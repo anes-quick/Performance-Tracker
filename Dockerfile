@@ -9,4 +9,6 @@ RUN pip install --no-cache-dir -r /app/scraper/requirements.txt
 
 COPY . /app
 
-CMD ["bash", "scripts/nightly-scrape.sh"]
+# Default: scrape on each container start (every deploy/restart). To avoid API use on deploy,
+# set Railway variable RUN_SCRAPE_ON_START=0 and schedule Cron: bash scripts/nightly-scrape.sh
+CMD ["bash", "scripts/railway-entry.sh"]

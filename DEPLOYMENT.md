@@ -67,6 +67,18 @@ Same as local `scraper/.env`:
    ```
 4. Set all env vars / mounted files for Google + YouTube + OAuth.
 
+#### Deploy vs scrape (important)
+
+The Docker image **`CMD`** runs `scripts/railway-entry.sh`. By default **`RUN_SCRAPE_ON_START` is unset (= `1`)**, so **every new container** (deploy, restart, crash recovery) runs the **full** nightly scrape once — that’s a lot of YouTube API calls if you push often.
+
+**Recommended:** In Railway → Variables set **`RUN_SCRAPE_ON_START=0`**. The container then **idles** (`sleep infinity`) on boot and **does not** scrape. Add a **Cron** (same service or Railway Cron) that runs only:
+
+```bash
+bash scripts/nightly-scrape.sh
+```
+
+on your chosen schedule (e.g. once per day). Then **code deploys don’t** trigger a full scrape; only the cron does.
+
 ### GitHub Actions (alternative)
 
 Schedule `cron: '0 0 * * *'`, checkout repo, setup Python, add secrets for service account JSON and API key, run `bash scripts/nightly-scrape.sh`. You still need a strategy for **OAuth token files** (e.g. base64 secret → write to `scraper/` before running).
