@@ -27,13 +27,15 @@ from __future__ import annotations
 
 import os
 import time
-from pathlib import Path
 from typing import Any, Dict, List
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from .analytics_oauth import load_oauth_credentials
+from .analytics_oauth import (
+    credentials_from_analytics_token_dict,
+    discover_youtube_analytics_token_payloads,
+)
 from .config import load_config
 from .run_channel_analytics_views import (
     _date_range,
@@ -75,41 +77,6 @@ def _normalize_api_currency(code: str) -> str:
     if c == "USD":
         return "USD"
     return "USD"
-
-
-def _discover_analytics_token_paths() -> List[Path]:
-    """
-    All OAuth tokens to merge revenue from.
-
-    - YT_ANALYTICS_TOKEN_PATHS=comma-separated paths (relative paths = under scraper/)
-    - Else every scraper/analytics-token*.json (multiple brand accounts)
-    - Else scraper/analytics-token.json only
-    """
-    scraper_dir = Path(__file__).resolve().parent
-    env_csv = os.environ.get("YT_ANALYTICS_TOKEN_PATHS", "").strip()
-    if env_csv:
-        out: List[Path] = []
-        for part in env_csv.split(","):
-            p = Path(part.strip()).expanduser()
-            if not p.is_absolute():
-                p = scraper_dir / p
-            if p.is_file():
-                out.append(p)
-        if out:
-            return out
-        print("  YT_ANALYTICS_TOKEN_PATHS set but no files found; falling back to glob")
-
-    paths = sorted(scraper_dir.glob("analytics-token*.json"))
-    if paths:
-        return paths
-
-    default = scraper_dir / "analytics-token.json"
-    if default.is_file():
-        return [default]
-    raise FileNotFoundError(
-        f"No OAuth token JSON in {scraper_dir}. "
-        "Run: python -m scraper.youtube_analytics_oauth_console"
-    )
 
 
 def _merge_revenue_for_one_login(
@@ -364,11 +331,8 @@ def run(days: int = 28) -> None:
             "channels.config.json (e.g. EUR) if Studio shows a different currency."
         )
 
-    token_paths = _discover_analytics_token_paths()
-    print(
-        f"Merging revenue from {len(token_paths)} OAuth token file(s): "
-        f"{', '.join(p.name for p in token_paths)}"
-    )
+    token_payloads = discover_youtube_analytics_token_payloads()
+    print(f"Merging revenue from {len(token_payloads)} OAuth token(s)")
 
     merged: Dict[tuple[str, str], Dict[str, Any]] = {}
     currency_hint = "USD"
@@ -381,13 +345,14 @@ def run(days: int = 28) -> None:
     if pause_sec > 0:
         print(f"Pause between OAuth tokens: {pause_sec}s (YT_ANALYTICS_TOKEN_PAUSE_SEC)")
 
-    for i, tp in enumerate(token_paths):
+    for i, payload in enumerate(token_payloads):
         if i > 0 and pause_sec > 0:
             print(f"\n  … waiting {pause_sec}s before next account …\n")
             time.sleep(pause_sec)
-        print(f"\n--- {tp.name} ---")
+        label = f"token {i + 1}/{len(token_payloads)}"
+        print(f"\n--- {label} ---")
         try:
-            creds = load_oauth_credentials(tp)
+            creds = credentials_from_analytics_token_dict(payload)
             analytics = build("youtubeAnalytics", "v2", credentials=creds)
             currency_hint = _merge_revenue_for_one_login(
                 analytics,
@@ -399,18 +364,18 @@ def run(days: int = 28) -> None:
                 api_currency,
             )
         except HttpError as e:
-            if e.resp.status == 401 and len(token_paths) > 1:
+            if e.resp.status == 401 and len(token_payloads) > 1:
                 print(
-                    f"  Skip {tp.name}: 401 — re-authorize with monetary scope:\n"
-                    f"    YT_ANALYTICS_OAUTH_CLIENT_SECRET_PATH=… "
-                    f"YT_ANALYTICS_TOKEN_OUT={tp.name} "
-                    f".venv/bin/python -m scraper.youtube_analytics_oauth_console"
+                    f"  Skip {label}: 401 — re-authorize with monetary scope locally, "
+                    f"then update YT_ANALYTICS_TOKEN_JSON / YT_ANALYTICS_TOKENS_JSON on Railway:\n"
+                    f"    .venv/bin/python -m scraper.youtube_analytics_oauth_console"
                 )
                 continue
             if e.resp.status == 401:
                 print(
-                    "\n*** 401 revenue access *** Re-run:\n"
+                    "\n*** 401 revenue access *** Re-run locally:\n"
                     "  python -m scraper.youtube_analytics_oauth_console\n"
+                    "Then paste refreshed JSON into Railway YT_ANALYTICS_TOKEN_JSON.\n"
                 )
             raise
 

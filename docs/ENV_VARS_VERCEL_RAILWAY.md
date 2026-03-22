@@ -53,7 +53,19 @@ Optional: `VERCEL_PRODUCTION_URL=https://your-app.vercel.app python3 scripts/pri
 
 ### YouTube Analytics OAuth (revenue / views scrapers)
 
-The scripts need **refresh token JSON** files (from `python -m scraper.youtube_analytics_oauth_console` locally). On Railway you must **provide those files** (e.g. volume, or encode and write in a startup script). See **`scraper/REAUTH_REVENUE.md`**. Until that’s set up, `scraper.run` can still work with only **`GOOGLE_SERVICE_ACCOUNT_JSON`** + **`YOUTUBE_API_KEY`**; Analytics steps may fail until tokens exist.
+The nightly job needs **OAuth refresh-token JSON** (from `python -m scraper.youtube_analytics_oauth_console` locally — same shape as `scraper/analytics-token.json`).
+
+**On Railway (no files in the image):** set one of:
+
+| Variable | Value |
+|----------|--------|
+| **`YT_ANALYTICS_TOKEN_JSON`** | Paste the **entire** contents of one `analytics-token*.json` (multiline OK). |
+| **`YT_ANALYTICS_TOKEN_JSON_BASE64`** | Base64 of that file (one line) if the UI mangles JSON. |
+| **`YT_ANALYTICS_TOKENS_JSON`** | JSON **array** of those objects, e.g. `[{...},{...}]`, if you use multiple Google accounts. |
+
+Optional: **`YT_ANALYTICS_TOKENS_JSON_BASE64`** for the array form.
+
+Until this is set, **`scraper.run`** still works with **`GOOGLE_SERVICE_ACCOUNT_JSON`** + **`YOUTUBE_API_KEY`**; **views + revenue** steps will fail. See **`scraper/REAUTH_REVENUE.md`** for re-auth.
 
 ---
 

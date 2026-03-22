@@ -15,12 +15,12 @@ from datetime import datetime, timedelta
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from .analytics_oauth import load_oauth_credentials
-from .config import load_config
-from .run_channel_analytics_revenue import (
-    _discover_analytics_token_paths,
-    _resolve_revenue_api_currency,
+from .analytics_oauth import (
+    credentials_from_analytics_token_dict,
+    discover_youtube_analytics_token_payloads,
 )
+from .config import load_config
+from .run_channel_analytics_revenue import _resolve_revenue_api_currency
 from .run_channel_analytics_views import _date_range
 
 
@@ -30,7 +30,7 @@ def _last_week_range() -> tuple[str, str]:
 
 
 def main() -> None:
-    paths = _discover_analytics_token_paths()
+    payloads = discover_youtube_analytics_token_payloads()
     cfg = load_config()
     api_currency = _resolve_revenue_api_currency(cfg)
     start_date, end_date = _last_week_range()
@@ -39,10 +39,10 @@ def main() -> None:
         f"Testing estimatedRevenue (MINE, day+channel): {start_date} → {end_date} ({cur_note})\n"
     )
 
-    for tp in paths:
-        print(f"── {tp.name} ──")
+    for i, payload in enumerate(payloads):
+        print(f"── token {i + 1}/{len(payloads)} ──")
         try:
-            creds = load_oauth_credentials(tp)
+            creds = credentials_from_analytics_token_dict(payload)
             analytics = build("youtubeAnalytics", "v2", credentials=creds)
             q = {
                 "ids": "channel==MINE",
