@@ -1,0 +1,5 @@
+{
+  "name": "performance-tracker",
+  "private": true,
+  "description": "Monorepo: Next.js app lives in frontend/. Vercel uses vercel.json install/build commands."
+}

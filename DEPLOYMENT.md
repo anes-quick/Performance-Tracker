@@ -17,24 +17,14 @@ So it’s **not** “Vercel **or** Railway” for the app — it’s **Vercel (w
 
 ## 1. Vercel (dashboard)
 
-1. Connect the Git repo.
-2. **Root directory:** `frontend` (this monorepo).
-3. **Environment variables** (production), at minimum:
+1. Connect the Git repo — **leave defaults** (no Root Directory in the UI). Repo root has `vercel.json` + `package.json`; install/build run in `frontend/` automatically.
+2. **Environment variables** (production), at minimum:
    - `NEXTAUTH_SECRET`, `NEXTAUTH_URL` (your real URL, e.g. `https://your-app.vercel.app`)
    - `ADMIN_USERNAME`, `ADMIN_PASSWORD`
    - Google / Sheets-related vars your API routes already expect (same names as local `frontend/.env.local`).
 4. Redeploy after changing env.
 
-`channels.config.json` lives at **repo root**. The frontend `loadConfig()` reads `../channels.config.json` from `frontend/` — that path works on Vercel **only if** you deploy from repo root with root `frontend`, or you copy/sync config. **Today’s code expects** the project root one level above `frontend/`. Easiest fix on Vercel:
-
-- Set **Root Directory** to `frontend` **and** ensure `channels.config.json` is available at `../channels.config.json` from the build — i.e. the build must see the parent folder. Vercel “Root Directory = frontend” often **does not** include parent files in the build context.
-
-**Checklist:** If deploy fails on “config not found”, either:
-
-- Deploy with **monorepo root** as project root and set **Install/build** to `cd frontend && npm ci && npm run build`, **Output** to `frontend/.next`, or  
-- Duplicate or symlink `channels.config.json` into `frontend/` and adjust `loadConfig` (future improvement).
-
-Verify after first deploy: hit an API that uses config or check logs.
+`channels.config.json` is **copied into `frontend/` during `npm run build`** (`prebuild` script) so serverless routes bundle it. Local `next dev` still reads the file from the repo root via `../channels.config.json`.
 
 ---
 

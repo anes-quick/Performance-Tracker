@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# Copied from repo root at prebuild (Vercel / production)
+/channels.config.json
+
 # production
 /build
 

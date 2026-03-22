@@ -50,16 +50,24 @@ export type AppConfig = {
 
 let cachedConfig: AppConfig | null = null;
 
+function resolveChannelsConfigPath(): string {
+  const cwd = process.cwd();
+  const candidates = [
+    path.join(cwd, "channels.config.json"),
+    path.join(cwd, "..", "channels.config.json"),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  throw new Error(
+    `channels.config.json not found. Tried: ${candidates.join(", ")}`
+  );
+}
+
 export function loadConfig(): AppConfig {
   if (cachedConfig) return cachedConfig;
 
-  // frontend/ → project root is one level up
-  const rootDir = path.resolve(process.cwd(), "..");
-  const configPath = path.join(rootDir, "channels.config.json");
-
-  if (!fs.existsSync(configPath)) {
-    throw new Error(`channels.config.json not found at ${configPath}`);
-  }
+  const configPath = resolveChannelsConfigPath();
 
   const raw = fs.readFileSync(configPath, "utf8");
   const parsed = JSON.parse(raw);
