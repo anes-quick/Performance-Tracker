@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { loadConfig } from "@/lib/config";
+import { createSheetsGoogleAuth } from "@/lib/googleSheetsAuth";
 
 export const runtime = "nodejs";
 
@@ -26,20 +27,10 @@ type SourcesApiResponse = {
 };
 
 async function getSheetsClient() {
-  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  if (!credentialsPath) {
-    throw new Error(
-      "GOOGLE_APPLICATION_CREDENTIALS is not set for the frontend API."
-    );
-  }
-
-  const auth = new google.auth.GoogleAuth({
-    keyFile: credentialsPath,
-    scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
-  });
-
-  const sheets = google.sheets({ version: "v4", auth });
-  return sheets;
+  const auth = createSheetsGoogleAuth([
+    "https://www.googleapis.com/auth/spreadsheets.readonly",
+  ]);
+  return google.sheets({ version: "v4", auth });
 }
 
 async function fetchVideoStatsRows() {

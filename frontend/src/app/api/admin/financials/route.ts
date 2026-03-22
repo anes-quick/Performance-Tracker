@@ -9,6 +9,7 @@ import {
   resolveAdminComputedCosts,
 } from "@/lib/adminComputedCosts";
 import { loadConfig, type AppConfig } from "@/lib/config";
+import { createSheetsGoogleAuth } from "@/lib/googleSheetsAuth";
 
 export const runtime = "nodejs";
 
@@ -284,14 +285,9 @@ function sheetRange(tab: string, a1: string): string {
 }
 
 async function getSheetsClient() {
-  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  if (!credentialsPath) {
-    throw new Error("GOOGLE_APPLICATION_CREDENTIALS is not set.");
-  }
-  const auth = new google.auth.GoogleAuth({
-    keyFile: credentialsPath,
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-  });
+  const auth = createSheetsGoogleAuth([
+    "https://www.googleapis.com/auth/spreadsheets",
+  ]);
   return google.sheets({ version: "v4", auth });
 }
 
