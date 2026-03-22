@@ -8,8 +8,10 @@ The Next.js app lives in **`frontend/`**. Vercel must use that folder as the pro
 2. **Root Directory** → **Edit** → set to **`frontend`**
 3. Save, then **Redeploy**
 
-Leave **Install Command** and **Build Command** empty (defaults).  
-Config is in **`frontend/vercel.json`**.
+**Install Command** and **Build Command** must **not** use `cd frontend` when Root Directory is already `frontend` (that breaks with `frontend/frontend`).
+
+- Prefer: leave them **empty** so **`frontend/vercel.json`** supplies `npm ci` / `npm run build`.
+- If the UI still shows `cd frontend && npm ci` from an old deploy, **clear** Install and Build overrides (or redeploy after pulling the latest `frontend/vercel.json`, which forces the correct commands).
 
 ## If Root Directory is wrong
 
