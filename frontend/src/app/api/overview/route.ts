@@ -4,6 +4,7 @@ import { loadConfig } from "@/lib/config";
 import { createSheetsGoogleAuth } from "@/lib/googleSheetsAuth";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type OverviewPoint = {
   date: string;
@@ -145,12 +146,21 @@ export async function GET(request: NextRequest) {
       coverage,
     };
 
-    return NextResponse.json(payload);
+    return NextResponse.json(payload, {
+      headers: {
+        "Cache-Control": "private, no-store, max-age=0, must-revalidate",
+      },
+    });
   } catch (err) {
     console.error("Error in /api/overview:", err);
     return NextResponse.json(
       { error: "Failed to load overview" },
-      { status: 500 }
+      {
+        status: 500,
+        headers: {
+          "Cache-Control": "private, no-store, max-age=0, must-revalidate",
+        },
+      }
     );
   }
 }

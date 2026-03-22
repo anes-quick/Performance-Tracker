@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { formatChartDateLabel } from "@/lib/formatChartDate";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import {
@@ -81,15 +82,6 @@ export default function Home() {
     return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   };
 
-  /** YYYY-MM-DD → e.g. 23.02 (day.month, German-style) */
-  const formatChartDate = (iso: string) => {
-    const s = String(iso).trim();
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-    if (!m) return s;
-    const day = String(Number(m[3]));
-    const month = m[2];
-    return `${day}.${month}`;
-  };
   const formatMio = (value: number) => {
     const mio = value / 1_000_000;
     return `${mio.toFixed(1).replace(".", ",")} Mio.`;
@@ -105,7 +97,9 @@ export default function Home() {
         if (selectedChannel !== "All channels") {
           params.set("channel", selectedChannel);
         }
-        const res = await fetch(`/api/overview?${params.toString()}`);
+        const res = await fetch(`/api/overview?${params.toString()}`, {
+          cache: "no-store",
+        });
         if (!res.ok) throw new Error("Failed to load overview data");
         const json = (await res.json()) as OverviewResponse;
         setData(json);
@@ -130,7 +124,9 @@ export default function Home() {
         if (selectedChannel !== "All channels") {
           params.set("channel", selectedChannel);
         }
-        const res = await fetch(`/api/outliers?${params.toString()}`);
+        const res = await fetch(`/api/outliers?${params.toString()}`, {
+          cache: "no-store",
+        });
         if (!res.ok) throw new Error("Failed to load outliers");
         const json = (await res.json()) as OutliersResponse;
         setOutliersData(json);
@@ -169,7 +165,9 @@ export default function Home() {
         if (selectedChannel !== "All channels") {
           params.set("channel", selectedChannel);
         }
-        const res = await fetch(`/api/videos?${params.toString()}`);
+        const res = await fetch(`/api/videos?${params.toString()}`, {
+          cache: "no-store",
+        });
         if (!res.ok) throw new Error("Failed to load videos");
         const json = (await res.json()) as VideosResponse;
         setVideosData(json);
@@ -333,7 +331,7 @@ export default function Home() {
                     dataKey="date"
                     minTickGap={20}
                     tick={{ fontSize: 12 }}
-                    tickFormatter={(v) => formatChartDate(String(v))}
+                    tickFormatter={(v) => formatChartDateLabel(String(v))}
                   />
                   <YAxis
                     tick={{ fontSize: 12 }}
@@ -341,7 +339,9 @@ export default function Home() {
                   />
                   <Tooltip
                     formatter={(value) => [formatThousands(Number(value)), "views"]}
-                    labelFormatter={(label) => formatChartDate(String(label))}
+                    labelFormatter={(label) =>
+                      formatChartDateLabel(String(label))
+                    }
                   />
                   <Line
                     type="monotone"

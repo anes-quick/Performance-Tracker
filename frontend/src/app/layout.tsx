@@ -19,6 +19,9 @@ export const metadata: Metadata = {
   description: "YouTube Shorts source & channel performance",
 };
 
+/** Fresh HTML / RSC per request so production picks up new deploys without stale shell cache. */
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({
   children,
 }: Readonly<{
