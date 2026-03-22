@@ -80,6 +80,16 @@ export default function Home() {
     const n = Math.round(value);
     return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   };
+
+  /** YYYY-MM-DD → e.g. 23.02 (day.month, German-style) */
+  const formatChartDate = (iso: string) => {
+    const s = String(iso).trim();
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (!m) return s;
+    const day = String(Number(m[3]));
+    const month = m[2];
+    return `${day}.${month}`;
+  };
   const formatMio = (value: number) => {
     const mio = value / 1_000_000;
     return `${mio.toFixed(1).replace(".", ",")} Mio.`;
@@ -319,13 +329,19 @@ export default function Home() {
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={data.chart}>
                   <CartesianGrid stroke="#e4e4e7" vertical={false} />
-                  <XAxis dataKey="date" minTickGap={20} tick={{ fontSize: 12 }} />
+                  <XAxis
+                    dataKey="date"
+                    minTickGap={20}
+                    tick={{ fontSize: 12 }}
+                    tickFormatter={(v) => formatChartDate(String(v))}
+                  />
                   <YAxis
                     tick={{ fontSize: 12 }}
                     tickFormatter={(v) => formatThousands(Number(v))}
                   />
                   <Tooltip
                     formatter={(value) => [formatThousands(Number(value)), "views"]}
+                    labelFormatter={(label) => formatChartDate(String(label))}
                   />
                   <Line
                     type="monotone"
