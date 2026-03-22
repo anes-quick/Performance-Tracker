@@ -1,0 +1,255 @@
+You are an AI coding assistant working in a Cursor project.
+
+Your task: Implement **Step 1 – Google Sheets–based Source ID System for Trello Card Creation** for a YouTube shorts workflow.
+
+=====================================================
+HIGH-LEVEL CONTEXT (READ CAREFULLY)
+=====================================================
+
+We run multiple main YouTube channels that post shorts.
+For each uploaded short, we want to know from which external "source" channel the idea/video came.
+
+Current workflow:
+- A VA finds a video on an external YouTube channel (the source).
+- She pastes that source video URL into a **Trello card creation tool**.
+- The tool creates a Trello card for our internal production pipeline.
+- Later, when we upload the short to one of our main channels, we will copy a **Source ID** from the Trello card and paste it into the YouTube description.
+
+Your mission in this project:
+- Implement the **Google Sheets + ID logic** and **Trello integration** so that:
+  - Every external source channel gets a **stable Source ID**.
+  - The tool checks if a Source ID already exists for the channel; if not, it creates a new one.
+  - The Trello card created by the tool contains the **Source ID** in a consistent, machine-readable format.
+
+Do NOT worry about:
+- The later scraping / analytics / frontend.
+- YouTube API integration.
+- Revenue tracking.
+
+You are ONLY implementing **Step 1: the Source ID system + Trello tool behavior**.
+
+=====================================================
+REQUIREMENTS – FUNCTIONAL BEHAVIOR
+=====================================================
+
+1. Source ID definition
+-----------------------
+
+- A "source" is an **external YouTube channel** from which we take video ideas.
+- Each source channel gets one and only one **Source ID**.
+- Source ID format:
+  - String: `"SRC" + zero-padded number`, e.g.:
+    - `SRC0001`
+    - `SRC0002`
+    - `SRC0003`
+  - No spaces or special characters.
+- Once assigned, a Source ID must **never change** and must **never be reused** for another channel.
+
+
+2. Google Sheet: Sources
+------------------------
+
+Create or use a Google Sheet named **"Sources"** (or configurable via env).
+
+The sheet must have at least these columns:
+- `source_id`              (string, e.g. `SRC0001`)
+- `source_channel_name`    (human-readable channel name)
+- `source_channel_url`     (canonical URL or some unique identifier; prefer the YouTube channel URL or channel ID)
+- `language`               (string like `DE`, `EN`; can initially be blank or defaulted)
+- `created_at`             (timestamp in ISO 8601; when this source was first seen)
+- `notes`                  (free text, optional)
+
+Rules:
+- The **combination that identifies a source** is `source_channel_url` (or channel ID) — we do NOT create new rows just because the name changes.
+- On lookup, we must treat `source_channel_url` (or channel ID) as canonical and unique.
+
+
+3. Core helper: getOrCreateSource
+---------------------------------
+
+Implement a function with semantics similar to:
+
+  getOrCreateSource(input: { sourceVideoUrl: string }): Promise<{
+    sourceId: string;
+    sourceChannelName: string;
+    sourceChannelUrl: string;
+  }>
+
+Behavior:
+1. Given a **source video URL** (a YouTube video URL from the external channel):
+   - Extract the **source channel identifier**:
+     - Prefer a stable channel ID or canonical channel URL.
+     - If you have a YouTube Data API client in this project already, you can use it to resolve the channel ID from the video URL.
+     - If not, at minimum, parse what you can from the URL such that the same source channel produces the same canonical string (but YouTube API resolution is preferred).
+
+2. Search the **Sources** sheet:
+   - If a row exists where `source_channel_url` (or ID) matches this channel:
+     - Return that row's `source_id`, `source_channel_name`, and `source_channel_url`.
+
+3. If no row exists:
+   - Generate the **next Source ID**:
+     - Look at existing `source_id` values.
+     - Parse out the numeric suffix (e.g. `0001` from `SRC0001`).
+     - Take the **max** numeric suffix and increment by 1.
+     - Format back to `"SRC" + zero-padded 4-digit number` (or more digits if needed; keep consistent).
+   - Determine `source_channel_name`:
+     - If you have access to YouTube API: fetch the channel name from the channel ID.
+     - If not, use a best-effort fallback (e.g. derived from URL) and document it in code comments.
+   - Insert a new row into `Sources` with:
+     - `source_id` = new ID (e.g. `SRC0007`)
+     - `source_channel_name`
+     - `source_channel_url`
+     - `language` = blank or default
+     - `created_at` = current timestamp in ISO 8601
+     - `notes` = blank
+   - Return the new ID and metadata.
+
+4. Concurrency safety (important):
+   - If your environment can run multiple instances in parallel, ensure that two concurrent calls don't create the same ID.
+   - Prefer to implement a simple **locking mechanism** at the sheet level or re-check the max ID just before inserting.
+   - If that's hard in your stack, at least make the ID generation logic robust and idempotent (re-check after tentative insertion, etc.).
+
+
+4. Trello card creation integration
+-----------------------------------
+
+We assume there is already a Trello card creation tool somewhere in this project.
+You need to **extend** it with Source ID behavior.
+
+Required changes:
+
+- Input:
+  - The VA provides a **source video URL** (YouTube URL) to the tool.
+  - The user does NOT choose the source channel manually; the tool must resolve it.
+
+- Flow:
+  1. On Trello card creation:
+     - Call `getOrCreateSource` with the **sourceVideoUrl**.
+     - Receive `sourceId` and `sourceChannelName`.
+  2. Create the Trello card exactly as before (title, labels, checklists, attachments, etc.).
+  3. Additionally, inject the Source ID into the card in a *stable, parseable way*:
+     - **Preferred**: a custom field named `Source ID` (if custom fields are available and already integrated).
+     - **Fallback / also do this**: add a line to the card description in the format:
+       - `Source ID:SRC0001`
+       - NOTE: no spaces around the colon, because later tools will parse this with a simple regex.
+  4. Optionally also include the human-readable source channel name in the description, for humans, e.g.:
+       - `Source Channel: Some Channel Name`
+       - But **only** `Source ID:SRC0001` is guaranteed to be parsed by future tools; don't rely on the name for parsing.
+
+
+5. Formatting and parsing standard (VERY IMPORTANT)
+---------------------------------------------------
+
+- The canonical format for the ID in Trello descriptions and (later) in YouTube descriptions is:
+  - `Source ID:SRC0001`
+  - No extra spaces; uppercase `SRC`; numeric suffix is zero-padded integer.
+- Future tools (like performance scrapers) will:
+  - Search for the pattern: `Source ID:SRC[0-9]+`
+  - Extract the ID: e.g. `SRC0001`.
+- Your implementation must:
+  - Always use exactly this format when writing to Trello.
+  - Never change case or add extra spaces around `Source ID:` or `SRC`.
+
+
+=====================================================
+REQUIREMENTS – TECHNICAL & QUALITY
+=====================================================
+
+1. Google Sheets integration
+----------------------------
+
+- Use the most idiomatic library for this project’s language/framework (e.g. `googleapis` in Node.js).
+- Store credentials/access tokens securely (env variables or local dev config).
+- Implement a small abstraction layer for the `Sources` sheet operations, e.g.:
+  - `getSourceByChannelUrl(channelUrl)`
+  - `getAllSources()`
+  - `insertSourceRow(sourceData)`
+
+
+2. Trello integration
+---------------------
+
+- Use the existing Trello client / integration if present.
+- When adding the `Source ID:SRC0001` line:
+  - If a description already exists, append the Source ID on a **new line at the end**.
+  - If description is empty, set it to just that line (or that line plus other info as current behavior dictates).
+- If custom fields are already being used:
+  - Prefer storing `sourceId` in a custom field `Source ID` as well (in addition to description).
+  - If not available, only description is fine for now.
+
+
+3. Configuration & environment
+------------------------------
+
+- Make sheet IDs, Trello board/list IDs, and any relevant API keys **configurable** via environment variables or a central config file.
+- Provide sane defaults for local development, with instructions in a README or comments.
+
+
+4. Testing & validation
+-----------------------
+
+- Implement at least minimal automated tests (or well-structured manual test steps) for:
+  - `getOrCreateSource`:
+    - Returns existing source when channel already in sheet.
+    - Creates new source and increments ID correctly when not found.
+  - Trello creation flow:
+    - Card is created.
+    - Description contains `Source ID:SRCXXXX`.
+    - Repeated calls with videos from the same source channel reuse the same ID.
+
+
+=====================================================
+IMPLEMENTATION STRATEGY
+=====================================================
+
+Follow these steps in this Cursor project:
+
+1. **Inspect the existing codebase**:
+   - Find:
+     - Trello integration / card creation logic.
+     - Any existing Google Sheets or Google API integration.
+
+2. **Introduce a small module for Sources sheet operations**:
+   - A file like `sourcesSheet.ts` or `sourcesSheet.py` that:
+     - Connects to the `Sources` Google Sheet.
+     - Provides functions to read rows and append a new row.
+
+3. **Implement `getOrCreateSource`**:
+   - In its own file or close to `sourcesSheet` module.
+   - Handle URL → channel resolution (via YouTube API if available).
+
+4. **Extend the Trello card creation tool**:
+   - Make sure the tool accepts a `sourceVideoUrl` as input.
+   - Integrate `getOrCreateSource`.
+   - Inject `Source ID:SRC000X` into the description/custom field.
+
+5. **Add basic tests or at least a manual test script**:
+   - So we can quickly verify:
+     - First-time use of a new source creates a new row in `Sources`.
+     - Second use of the same source reuses the same `source_id`.
+
+6. **Document usage**:
+   - Short README section (or code comments) explaining:
+     - How to configure Google Sheets ID, Trello IDs, and credentials.
+     - How the VA is expected to use the tool (input: source video URL).
+
+
+=====================================================
+FINAL GOAL OF THIS STEP
+=====================================================
+
+By the end of this implementation, the following MUST be true:
+
+1. There is a working `Sources` Google Sheet that stores:
+   - Unique `source_id` per external channel.
+2. Given a source video URL:
+   - The system can reliably:
+     - Find or create a matching row in `Sources`.
+     - Return a stable `source_id`.
+3. Every Trello card created via the tool:
+   - Contains a line like `Source ID:SRC000X` in its description (and/or a `Source ID` custom field).
+4. Repeated Trello card creations for videos from the same external channel:
+   - Always reuse the existing `source_id` from the `Sources` sheet.
+
+Implement this robustly and clearly so future tools (YouTube performance scrapers, dashboards) can rely 100% on the `Source ID:SRC000X` pattern and on the `Sources` sheet data.
+

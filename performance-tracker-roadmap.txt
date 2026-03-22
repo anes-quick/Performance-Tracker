@@ -1,0 +1,438 @@
+Performance Tracker – System & Dev Roadmap
+
+Last updated: 2026-03-20
+
+=====================================================
+0. IMPLEMENTED – Sources Sheet & Trello Tool (Phase 1)
+=====================================================
+
+Phase 1 is complete. Reference for downstream tools (scrapers, frontend):
+
+- Google Sheet URL:
+  https://docs.google.com/spreadsheets/d/1nZaolnDQb9rO17tqLCALYniCvzujFI0wKKrrUt9TAlY/edit?gid=0#gid=0
+
+- Spreadsheet ID: 1nZaolnDQb9rO17tqLCALYniCvzujFI0wKKrrUt9TAlY
+- Tab name: sheet
+
+- Column layout (as implemented). Header row is row 5:
+  - B5 = Channel        (human-readable source channel name)
+  - C5 = Channel ID     (YouTube channel ID)
+  - D5 = Tracking ID    (Source ID, e.g. SRC0001)
+  - E5 = Link           (optional)
+  - F5 = Niche tags     (optional, comma-separated: commentary, scary, dance — used by Sources dashboard filter/badges)
+
+- Mapping for scrapers / frontend:
+  - source_id             = Column D (Tracking ID), e.g. SRC0001
+  - source_channel_id     = Column C (Channel ID), YouTube channel ID
+  - source_channel_name   = Column B (Channel), human-readable name
+  - link                  = Column E (optional)
+
+- Trello card output: Source ID appears on the card as e.g. [ SRC0010 ].
+- YouTube description: When pasting into the Short description, use a consistent line so the scraper can parse it. Recommended: "Source ID:SRC0010" (no spaces around colon). The scraper should also accept variants such as "[ SRC0010 ]" or bare "SRC0010" (regex: SRC[0-9]+).
+
+=====================================================
+MAIN CHANNELS & CONFIG (for scraper)
+=====================================================
+
+- Config file: channels.config.json (in this project).
+- Spreadsheet: same as above. Tab for raw video stats: videostatsraw.
+- Daily scrape time: 00:00 (midnight, timezone to be set when deploying).
+
+Main channels we upload on (5 total):
+
+| Name          | Handle          | Niche      | URL |
+|---------------|-----------------|------------|-----|
+| CrazyMomente  | CrazyMomente    | commentary | https://www.youtube.com/@CrazyMomente/shorts |
+| Nunito        | nunitoOriginal  | commentary | https://www.youtube.com/@nunitoOriginal |
+| Mira          | mira.originaI   | commentary | https://www.youtube.com/@mira.originaI |
+| Aven          | aven.original   | scary      | https://www.youtube.com/@aven.original |
+| Asenti        | asentii         | dance      | https://www.youtube.com/@asentii |
+
+- 3 commentary, 2 niched (scary, dance). Scraper will resolve @handle to YouTube Channel ID via API when needed.
+- VideoStatsRaw tab name: videostatsraw (already created).
+
+Next: build the daily video stats scraper (Phase 2) in this project.
+
+=====================================================
+1. Core Concepts
+=====================================================
+
+- We have multiple “main” YouTube channels.
+- Each main channel can use MANY different external “source” channels for ideas/content.
+- Every external source channel gets a stable Source ID (e.g. SRC0001).
+- For each uploaded video on a main channel, we embed the Source ID in the YouTube description.
+- A daily scraper pulls video performance + parses Source ID + writes everything into Google Sheets.
+- A separate daily scraper pulls per-channel totals and (later) revenue.
+- A frontend/dashboard reads that data to show channel and source performance.
+
+=====================================================
+2. IDs and Trello Tool Behaviour
+=====================================================
+
+2.1 Source IDs
+
+- ID format: simple, stable, machine-friendly and human-readable.
+  - Example format: SRC0001, SRC0002, … (fixed “SRC” prefix + zero-padded number).
+  - No spaces or special characters to keep parsing easy.
+- One Source ID per external source channel (not per video).
+  - All videos that come from the same external channel reuse the same Source ID.
+
+2.2 Sources Sheet (Google Sheets)
+
+- Tab name in spreadsheet: sheet (see Section 0 for full reference).
+- Columns (as implemented): B=Channel, C=Channel ID, D=Tracking ID, E=Link (header row 5).
+- Logical mapping (minimum, can extend later):
+  - source_id          (string, e.g. SRC0001)
+  - source_channel_name
+  - source_channel_url (or YouTube channel ID)
+  - language           (e.g. DE, EN)
+  - created_at         (timestamp of first time seen)
+  - notes              (optional)
+
+2.3 Trello Card Creation Tool Logic
+
+- Input from VA:
+  - The VA finds a video from a source (existing or new) and passes the video URL into the Trello card creation tool.
+  - The VA does NOT manually pick the source; everything is automatic from the URL.
+
+- Tool steps:
+  1. Extract channel identifier from the given source video URL.
+     - Prefer a canonical representation like channel ID or canonical channel URL.
+  2. Look up the channel in the Sources sheet:
+     - If a row with this channel already exists:
+       - Reuse existing source_id.
+     - If it does not exist:
+       - Create a new row in Sources.
+       - Generate the next Source ID (SRC0001, SRC0002, …).
+       - Store channel name + channel URL + language (if known) + created_at.
+  3. Create Trello card:
+     - Populate all existing fields as today (title, link to source video, notes, etc.).
+     - Also insert the Source ID into a predictable place, e.g. in description:
+       - Example: “Source ID:SRC0001” (no spaces after the colon for easier parsing).
+       - Or use a Trello custom field “Source ID” if available.
+  4. (Human step later) When uploading the YouTube Short:
+     - The uploader copies the Source ID from the Trello card.
+     - They paste it into the YouTube description in a consistent machine-readable format, e.g.:
+       - Last line: “Source ID:SRC0001”
+
+- Important stability rule:
+  - Once a channel has a Source ID, we never change or reuse it for a different channel.
+
+=====================================================
+3. Scraping Strategy
+=====================================================
+
+3.1 Frequency & Coverage
+
+- Frequency:
+  - Once per day (MVP) at a fixed time when stats are relatively stable (e.g. 01:00 local time).
+  - We can later add a second scrape (e.g. after the evening upload batch) if needed.
+
+- Video tracking window:
+  - Each video is tracked for 60 days after its upload date.
+  - After 60 days, the scraper stops writing new rows for that video (to save API and sheet space).
+  - This is enough to understand performance profile, outliers, and source quality.
+
+3.2 Efficient API Usage (Avoid Per-Video Calls)
+
+- We will use YouTube Data API v3 with batching:
+  - Step 1: List recent videos per channel:
+    - Use playlistItems.list on the channel’s “uploads” playlist, or search.list with channelId.
+    - Only keep videos published in the last 60 days.
+  - Step 2: Batch fetch stats:
+    - Use videos.list with up to 50 video IDs per request to get statistics in bulk.
+    - This significantly reduces API calls vs. one API call per video.
+
+- For each main channel:
+  - We only consider videos within the last 60 days.
+  - For each such video, we:
+    - Pull its current view count and other needed fields.
+    - Pull its description once (or occasionally) to parse Source ID.
+
+3.3 Fields to Collect Per Video
+
+- From YouTube Data API v3, per video:
+  - video_id
+  - video_url
+  - title
+  - published_at
+  - view_count
+  - (Optionally) other basic stats later if needed, but for now:
+    - We explicitly do NOT collect like_count or comment_count.
+  - channel_id (the main channel that uploaded this video)
+  - channel_title (the main channel name)
+  - description (to parse Source ID)
+
+=====================================================
+4. Revenue Data from YouTube
+=====================================================
+
+- YouTube Data API v3 (the one used for video and channel details) does NOT provide revenue.
+- Revenue is available via the YouTube Analytics API.
+- Constraints:
+  - The YouTube Analytics API only gives revenue data for channels you own / manage and have linked properly (not for arbitrary external channels).
+  - It requires OAuth or a properly authorized service account with access to each of your main channels.
+- Plan:
+  - Phase 1:
+    - Implement Data API v3 for video and channel stats only.
+  - Phase 2:
+    - Add YouTube Analytics API integration for OWNED main channels only, to fetch:
+      - Estimated revenue per channel per day.
+      - Optionally per-video revenue if needed.
+    - Store this in a dedicated revenue table/sheet (see Section 5).
+
+=====================================================
+5. Google Sheets Data Model
+=====================================================
+
+We keep everything in centralized tables that are easy to filter and aggregate. We can later build separate filtered views or dashboards without duplicating the data structure.
+
+5.1 Sheet: Sources
+
+- As defined in 2.2:
+  - source_id
+  - source_channel_name
+  - source_channel_url (or ID)
+  - language
+  - created_at
+  - notes
+
+5.2 Sheet: VideoStatsRaw
+
+- Purpose:
+  - Time-series table: one row per video per scrape run.
+  - Enables tracking of performance over time and calculating deltas.
+
+- Columns:
+  - scrape_datetime          (timestamp of when the scraper ran)
+  - main_channel_id          (channel that uploaded the short)
+  - main_channel_name
+  - main_channel_group       (optional: grouping like “DE Shorts”, “EN Main”, etc.)
+  - video_id
+  - video_url
+  - title
+  - published_at
+  - views                    (total views at scrape time)
+  - source_id                (parsed from description, e.g. “SRC0001”)
+  - source_channel_name      (lookup from Sources by source_id)
+  - language                 (from Sources or main channel configuration)
+
+- Clarification:
+  - YES, the main channel where the video is uploaded IS stored here (via main_channel_id and main_channel_name).
+  - This allows analysis like:
+    - “Which sources work best on channel X?”
+    - “How does source performance differ across main channels?”
+
+5.3 Sheet: ChannelDailyStats
+
+- Purpose:
+  - One row per main channel per day for totals.
+
+- Columns:
+  - date
+  - channel_id
+  - channel_name
+  - total_views
+  - total_subscribers
+  - total_videos
+  - estimated_revenue        (Phase 2, via YouTube Analytics)
+
+5.4 Sheet: ChannelRevenue (Phase 2, optional)
+
+- If/when YouTube Analytics API is added:
+  - date
+  - channel_id
+  - channel_name
+  - estimated_revenue
+  - currency
+  - (optionally) per-video revenue if needed.
+
+=====================================================
+6. Implementation & Dev Environment
+=====================================================
+
+6.1 Local Development and Deployment
+
+- Development flow:
+  - Build and test the scraper(s) and backend locally:
+    - Use Node.js or Python for the backend/scrapers.
+    - Use environment variables for API keys and service accounts.
+  - Once stable, deploy:
+    - Frontend: Vercel (Next.js or another framework).
+    - Backend / cron jobs: Railway (or another service) running:
+      - Daily scraper job(s).
+      - Simple API endpoints (e.g. to read aggregated stats or directly from Sheets).
+
+6.2 Authentication / Google Login
+
+- For the frontend:
+  - Use Google OAuth login for access control.
+  - In Google Cloud Console:
+    - Register the web app.
+    - Add the relevant Google accounts (team members) that should have access.
+
+- For API/service accounts:
+  - Use a service account with access to:
+    - Google Sheets (for reading/writing data).
+    - YouTube Data API v3 (for stats).
+    - Later, YouTube Analytics API (for revenue), restricted to owned channels.
+
+=====================================================
+7. Development Phases (Detailed)
+=====================================================
+
+PHASE 1 – Trello Tool + Sources Sheet
+
+- Goals:
+  - Automatic Source ID assignment and storage.
+  - Source ID added to Trello cards in a consistent format.
+
+- Tasks:
+  1. Create the Sources sheet with initial columns.
+  2. Implement helper function:
+     - getOrCreateSource(channel_url or channel_id) -> source_id
+  3. Extend the existing Trello card creation tool:
+     - Input: source video URL.
+     - Extract the channel identifier.
+     - Call getOrCreateSource.
+     - Create Trello card with:
+       - Existing content.
+       - “Source ID:SRC000X” in description or custom field.
+  4. Document VA workflow:
+     - How to use the tool.
+     - Where to find the Source ID on the Trello card.
+     - How to paste it into the YouTube description.
+
+PHASE 2 – Daily Video Stats Scraper (No Revenue, Once per Day)
+
+- Goals:
+  - Once per day, collect stats for all videos published in the last 60 days on all main channels.
+  - Parse Source IDs from descriptions and link them to Sources.
+
+- Tasks:
+  1. Set up YouTube Data API v3 credentials and Sheets API access.
+  2. Configuration file:
+     - List of main channels:
+       - channel_id
+       - channel_name
+       - language
+       - group (optional)
+  3. Implement scraper logic:
+     - For each main channel:
+       - List channel uploads within the last 60 days.
+       - Batch fetch stats for those video IDs (videos.list with up to 50 IDs per call).
+       - For each video:
+         - Compute age; skip if > 60 days (safety double-check).
+         - Extract Source ID from description via regex on “Source ID:SRC[0-9]+”.
+         - Lookup source_channel_name from Sources.
+         - Append a row to VideoStatsRaw.
+  4. Scheduling:
+     - Set up a daily cron (Railway, CRON job, or similar) to run the scraper once per day at the chosen time.
+
+PHASE 3 – Channel Daily Stats Scraper
+
+- Goals:
+  - Daily snapshot of per-channel totals (views, subs, video count).
+
+- Tasks:
+  1. Extend or add a script:
+     - For each main channel:
+       - Call channels.list (YouTube Data API v3) to get statistics.
+       - Append a row to ChannelDailyStats with:
+         - date
+         - channel_id
+         - channel_name
+         - total_views
+         - total_subscribers
+         - total_videos
+  2. Run daily alongside the video stats scraper.
+
+PHASE 4 – Basic Analytics & Dashboards (Using Sheets / Looker Studio)
+
+- Goals:
+  - Get initial visibility before building a custom frontend.
+
+- Tasks:
+  1. In Google Sheets or Looker Studio, build:
+     - Top sources by average views per video (over chosen time range).
+     - Top sources by number of outliers (e.g. videos above N views).
+     - Performance per main channel (views per day, growth).
+  2. Validate:
+     - Data quality (Source IDs correctly mapped).
+     - Insights are meaningful for decisions.
+
+PHASE 5 – Custom Frontend (Next.js on Vercel + Backend on Railway)
+
+- Goals:
+  - Provide a clean UI for:
+     - Global views across all channels.
+     - Per-channel analytics.
+     - Source rankings (average views, outliers, etc.).
+
+- Tasks:
+  1. Frontend:
+     - Implement Google login.
+     - Build pages:
+       - Overview dashboard (total views, total revenue when available).
+       - Channel page with filters (by channel, date range, language).
+       - Source ranking page (average views, outliers, hit rate).
+  2. Backend:
+     - Implement endpoints that:
+       - Read from Sheets (or a local cache DB) and return aggregated stats.
+       - Handle filters for channels, time ranges, and languages.
+  3. Deploy on Vercel (frontend) and Railway (backend).
+
+PHASE 6 – Revenue Integration (YouTube Analytics API) [Optional / Later]
+
+- Goals:
+  - Pull estimated revenue per owned main channel per day.
+  - Integrate revenue into dashboards (e.g. RPM per source, per channel).
+
+- Tasks:
+  1. Enable YouTube Analytics API in Google Cloud.
+  2. Configure OAuth so only your channels are accessed.
+  3. Implement a scheduled revenue scraper:
+     - For each owned main channel:
+       - Fetch yesterday’s revenue.
+       - Write to ChannelRevenue sheet.
+  4. Extend dashboards and frontend:
+     - Show revenue totals and trends per channel.
+     - Optionally implement views like revenue per thousand views (RPM).
+
+=====================================================
+8. Open Questions / Decisions to Confirm
+=====================================================
+
+- Exact cron time for daily scrape (e.g. 01:00 CET).
+- Final decision on Source ID string format:
+  - Example chosen here: “SRC” + zero-padded number (SRC0001).
+- Exact regex pattern for parsing Source ID from descriptions:
+  - Example: “Source ID:SRC[0-9]+”.
+- Whether we ever need a second daily scrape (e.g. for first-12-hours performance).
+
+=====================================================
+9. SOURCE NICHES & TAGS (implemented in frontend)
+=====================================================
+
+- Sources sheet: optional **F5 = Niche tags** (comma-separated: `commentary`, `scary`, `dance`). Data row 6+ column F.
+- `channels.config.json` maps each main upload channel to a niche (commentary / scary / dance).
+- `/api/sources` returns `niche_tags`, `used_on_channels`, and `nicheOptions`.
+- Niche filter: shows a source if its sheet tags include the niche **or** it has uploads on a main channel of that niche (within current channel + period filters).
+- Sources UI: Niche dropdown, tags + “Used on: …” in table, top list, and source video modal.
+
+Main channel breakdown (5 upload channels):
+- 3 × commentary: CrazyMomente, Nunito, Mira
+- 1 × scary: Aven
+- 1 × dance (music/dance): Asenti
+
+=====================================================
+10. ADMIN-ONLY FINANCE DASHBOARD (owner only)
+=====================================================
+
+- URL: `/admin` (not linked from main UI; bookmark for owner only).
+- Access: username + password from `.env.local` (`ADMIN_USERNAME`, `ADMIN_PASSWORD`) via NextAuth credentials + `NEXTAUTH_SECRET` / `NEXTAUTH_URL`.
+- Data: reads tab `adminfinance` (config key `adminFinanceTab` in `channels.config.json`) — columns Date | Channel | Revenue | Costs | Note (headers flexible EN/DE).
+- Shows totals (revenue, costs, profit) and breakdown by channel + recent rows preview.
+- Setup: see `frontend/ADMIN_SETUP.md` and `frontend/.env.example`.
+- Revenue: run `python -m scraper.run_channel_analytics_revenue` (YouTube Analytics `estimatedRevenue` → `adminfinance`, tagged rows); OAuth must include `yt-analytics-monetary.readonly` (see `ADMIN_SETUP.md`). VA never needs this tab if restricted in Sheets.
+

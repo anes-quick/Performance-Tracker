@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>My Tool</title>
+  <style>
+    :root { --bg:#0f0f10; --surface:#18181b; --text:#fafafa; --muted:#71717a; --accent:#e8ff47; --border:#27272a; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+    /* Nav placeholder: add shared navigation bar here later */
+    header { padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .main { padding: 1.5rem; max-width: 900px; margin: 0 auto; }
+    h1 { font-size: 1.25rem; margin: 0 0 1rem; }
+    .status { font-size: 0.85rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <span>My Tool</span>
+    <!-- Later: add shared nav (e.g. link to homepage, other tools) -->
+  </header>
+  <main class="main">
+    <h1>My Tool</h1>
+    <p class="status" id="status">Checking backend…</p>
+  </main>
+  <script>
+    const BACKEND_URL = /localhost|127\.0\.0\.1/.test(window.location.hostname)
+      ? 'http://localhost:8001'
+      : 'https://YOUR-RAILWAY-APP.up.railway.app';
+
+    fetch(`${BACKEND_URL}/api/health`)
+      .then(r => r.json())
+      .then(d => { document.getElementById('status').textContent = 'Backend: ' + (d.status === 'ok' ? 'connected' : d.status); })
+      .catch(() => { document.getElementById('status').textContent = 'Backend: unreachable'; });
+  </script>
+</body>
+</html>

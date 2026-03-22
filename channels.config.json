@@ -1,0 +1,54 @@
+{
+  "youtubeAnalyticsRevenueCurrency": "EUR",
+  "youtubeAnalyticsIncludeTodayPacific": false,
+  "spreadsheetId": "1nZaolnDQb9rO17tqLCALYniCvzujFI0wKKrrUt9TAlY",
+  "sourcesTab": "sheet",
+  "videoStatsRawTab": "videostatsraw",
+  "channelDailyTab": "channeldaily",
+  "channelAnalyticsTab": "channelanalytics",
+  "adminFinanceTab": "adminfinance",
+  "adminComputedCosts": {
+    "editorUsdPerVideo": 3,
+    "channelEditorUsdPerVideo": {
+      "Asenti": 4
+    },
+    "vaUsdPerWeek": 126,
+    "subscriptionUsdPerMonth": 160
+  },
+  "adminChannelRevenueSplits": {
+    "CrazyMomente": { "yourPercent": 75 }
+  },
+  "scrapeTimeUtc": "00:00",
+  "channels": [
+    {
+      "handle": "CrazyMomente",
+      "name": "CrazyMomente",
+      "niche": "commentary",
+      "url": "https://www.youtube.com/@CrazyMomente/shorts"
+    },
+    {
+      "handle": "nunitoOriginal",
+      "name": "Nunito",
+      "niche": "commentary",
+      "url": "https://www.youtube.com/@nunitoOriginal"
+    },
+    {
+      "handle": "mira.originaI",
+      "name": "Mira",
+      "niche": "commentary",
+      "url": "https://www.youtube.com/@mira.originaI"
+    },
+    {
+      "handle": "aven.original",
+      "name": "Aven",
+      "niche": "scary",
+      "url": "https://www.youtube.com/@aven.original"
+    },
+    {
+      "handle": "asentii",
+      "name": "Asenti",
+      "niche": "dance",
+      "url": "https://www.youtube.com/@asentii"
+    }
+  ]
+}
