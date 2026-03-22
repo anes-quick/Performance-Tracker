@@ -1,10 +1,7 @@
 {
   "name": "performance-tracker",
   "private": true,
-  "description": "Monorepo: real app in frontend/. Root lists next so Vercel detects Next.js; install/build run in frontend/.",
-  "dependencies": {
-    "next": "16.1.7"
-  },
+  "description": "Monorepo: Next.js app in frontend/. On Vercel set Root Directory to frontend/ (see DEPLOY_VERCEL.md).",
   "scripts": {
     "build": "cd frontend && npm run build"
   }
