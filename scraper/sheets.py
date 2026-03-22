@@ -1,4 +1,6 @@
 """Google Sheets: read Sources (source_id -> name), append VideoStatsRaw rows."""
+import base64
+import binascii
 import json
 import os
 from google.oauth2 import service_account
@@ -28,31 +30,74 @@ VIDEOSTATS_HEADERS = [
 ]
 
 
+def _credentials_from_json_blob(json_blob: str, source_label: str):
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    try:
+        info = json.loads(json_blob)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"{source_label} is set but is not valid JSON. "
+            "If you pasted on Railway, try GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 instead "
+            "(run: base64 -i your-key.json | tr -d '\\n')."
+        ) from e
+    return service_account.Credentials.from_service_account_info(info, scopes=scopes)
+
+
 def _get_sheets_service():
     """Build Sheets API v4 service with service account credentials."""
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     json_blob = (os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
-    creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    json_b64 = (os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64") or "").strip()
+    creds_path = (os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or "").strip() or None
 
     if json_blob:
+        credentials = _credentials_from_json_blob(json_blob, "GOOGLE_SERVICE_ACCOUNT_JSON")
+    elif json_b64:
         try:
-            info = json.loads(json_blob)
-        except json.JSONDecodeError as e:
+            raw = base64.b64decode(json_b64, validate=True)
+        except binascii.Error as e:
             raise RuntimeError(
-                "GOOGLE_SERVICE_ACCOUNT_JSON is set but is not valid JSON."
+                "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 is not valid base64."
             ) from e
-        credentials = service_account.Credentials.from_service_account_info(
-            info, scopes=scopes
+        try:
+            decoded = raw.decode("utf-8")
+        except UnicodeDecodeError as e:
+            raise RuntimeError(
+                "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 decodes to non-UTF-8 bytes."
+            ) from e
+        credentials = _credentials_from_json_blob(
+            decoded, "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 (decoded)"
         )
     elif creds_path and os.path.isfile(creds_path):
         credentials = service_account.Credentials.from_service_account_file(
             creds_path, scopes=scopes
         )
     else:
-        raise RuntimeError(
-            "Set GOOGLE_APPLICATION_CREDENTIALS to the path of your service account JSON, "
-            "or set GOOGLE_SERVICE_ACCOUNT_JSON to the full JSON (e.g. on Railway)."
+        hints = []
+        if creds_path:
+            if creds_path.startswith("/Users/") or creds_path.startswith("/home/"):
+                hints.append(
+                    f"GOOGLE_APPLICATION_CREDENTIALS points to {creds_path!r} — that path "
+                    "exists on your laptop, not inside Railway/Docker. "
+                    "Add GOOGLE_SERVICE_ACCOUNT_JSON (full JSON) or "
+                    "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 in Railway Variables."
+                )
+            elif not os.path.isfile(creds_path):
+                hints.append(
+                    f"GOOGLE_APPLICATION_CREDENTIALS is {creds_path!r} but that file is missing in the container."
+                )
+        else:
+            hints.append(
+                "No GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 in the environment."
+            )
+        msg = (
+            "Google Sheets credentials missing. In Railway: add variable "
+            "GOOGLE_SERVICE_ACCOUNT_JSON with the full service account JSON, "
+            "or GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 (base64 of that file, one line). "
         )
+        if hints:
+            msg += " ".join(hints)
+        raise RuntimeError(msg)
     return build("sheets", "v4", credentials=credentials)
 
 

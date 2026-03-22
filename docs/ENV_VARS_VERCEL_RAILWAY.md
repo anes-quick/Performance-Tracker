@@ -2,6 +2,15 @@
 
 Use **your real values** everywhere. Do not commit secrets to Git.
 
+**Generate copy-paste tables from your existing local files** (reads `frontend/.env.local`, `scraper/.env`, service account JSON, `scraper/analytics-token*.json`):
+
+```bash
+cd "/path/to/Performance Tracker"
+python3 scripts/print-platform-envs.py
+```
+
+Optional: `VERCEL_PRODUCTION_URL=https://your-app.vercel.app python3 scripts/print-platform-envs.py` if not using the default URL in the script.
+
 ---
 
 ## Vercel (Next.js app + `/api/*`)
@@ -28,8 +37,9 @@ Use **your real values** everywhere. Do not commit secrets to Git.
 
 | Variable | What to put |
 |----------|-------------|
-| **`GOOGLE_SERVICE_ACCOUNT_JSON`** | **Recommended:** paste the **same** full service account JSON as on Vercel. |
-| **`GOOGLE_APPLICATION_CREDENTIALS`** | **Alternative:** path to JSON **inside the container** (only if you mount/write that file). |
+| **`GOOGLE_SERVICE_ACCOUNT_JSON`** | Paste the **same** full service account JSON as on Vercel (minified one line is safest). |
+| **`GOOGLE_SERVICE_ACCOUNT_JSON_BASE64`** | **If JSON var breaks on Railway:** one-line base64 of that file: `base64 -i key.json \| tr -d '\n'` (macOS). The scraper decodes this automatically. |
+| **`GOOGLE_APPLICATION_CREDENTIALS`** | **Do not** set this to a **Mac path** (`/Users/...`) — that file is **not** in the container. Only use if the JSON exists **inside** the image (e.g. `/app/sa.json` from a custom step). |
 | **`YOUTUBE_API_KEY`** | YouTube Data API v3 key (same as local `scraper/.env`). |
 
 ### Optional (Railway)
