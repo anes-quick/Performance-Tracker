@@ -1,0 +1,2 @@
+# Root file so Railway / Nixpacks / Railpack detect Python in this monorepo.
+-r scraper/requirements.txt

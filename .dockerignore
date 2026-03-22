@@ -1,0 +1,11 @@
+.git
+frontend/node_modules
+frontend/.next
+.venv
+venv
+__pycache__
+*.pyc
+.env
+.env.*
+!.env.example
+neon-feat*.json

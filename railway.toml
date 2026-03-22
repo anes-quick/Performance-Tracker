@@ -1,0 +1,4 @@
+# Prefer Docker so the scraper image is explicit (avoids Railpack “could not build” on monorepo).
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
