@@ -82,18 +82,13 @@ function rowInYoutubeStudioWindow(
 }
 
 /**
- * RPM / monetization basis: `engaged_views` (column E) when **> 0**; otherwise **`views`** (D).
- * YouTube Analytics often returns `engagedViews` as 0 for some channels (e.g. Shorts-heavy)
- * even when `views` is non-zero — using 0 would zero out RPM, so we fall back to views.
+ * RPM / monetization basis (temporary approximation): use `views / 2` from column D.
+ * Engaged/active views are currently unreliable in this setup, so we estimate them as 50% of views.
  */
 function monetizedViewsFromChannelAnalyticsRow(row: string[]): number {
   const v = Number(row[3] ?? 0);
   const views = Number.isFinite(v) && v >= 0 ? v : 0;
-  if (row.length >= 5) {
-    const e = Number(row[4]);
-    if (Number.isFinite(e) && e > 0) return e;
-  }
-  return views;
+  return views / 2;
 }
 
 /**
@@ -272,7 +267,7 @@ function rpmUsdForChannel(
   return def;
 }
 
-/** Total monetized basis (engaged_views, else views) per calendar day — all channels in sheet. */
+/** Total estimated monetized basis (views/2) per calendar day — all channels in sheet. */
 function buildDailyViewsByDay(
   analyticsRows: string[][],
   windowBounds: { startIso: string; endIso: string } | null

@@ -90,7 +90,7 @@ type FinancialsResponse = {
     | "views_rpm_usd"
     | "views_rpm_eur"
     | "manual_rpm_eur";
-  /** Per day: sum of engaged_views (col E) when scraped; else legacy `views` (col D). Used for RPM. */
+  /** Per day: estimated monetized views basis for RPM (currently `views / 2`). */
   dailyViewsSeries?: { date: string; views: number }[];
   message?: string | null;
   info?: string | null;
@@ -458,20 +458,10 @@ function ComputedCostsSection({
           )}
           <div className={`border-t border-zinc-800 pt-4 ${cc ? "mt-6" : "mt-0"}`}>
             <h3 className="text-xs font-medium uppercase text-zinc-500">
-              Manual RPM (EUR / 1k engaged views)
+              Manual RPM (EUR / 1k estimated monetized views)
             </h3>
             <p className="mt-1 text-xs text-zinc-600">
-              Uses YouTube Analytics <strong className="text-zinc-500">engaged_views</strong>{" "}
-              (monetization basis; column <code className="text-zinc-500">engaged_views</code> in{" "}
-              <code className="text-zinc-500">channelanalytics</code>
-              ) when the views scraper has run after the sheet upgrade. Older rows fall back to
-              total <code className="text-zinc-500">views</code>. When RPM &gt; 0,{" "}
-              <strong className="text-zinc-500">per-channel revenue and top-line totals</strong>{" "}
-              are recomputed as{" "}
-              <code className="text-zinc-500">(engaged ÷ 1000) × RPM</code> in{" "}
-              <strong>EUR per 1,000 views</strong> (then converted for display). Sheet{" "}
-              <strong>costs</strong> in the window stay; editor/VA/sub are still added on top.
-              Saved in this browser.
+              Uses <code className="text-zinc-500">channelanalytics</code> total <strong className="text-zinc-500">views</strong> and estimates monetized/engaged views as <code className="text-zinc-500">views ÷ 2</code>. When RPM &gt; 0, <strong className="text-zinc-500">per-channel revenue and top-line totals</strong> are recomputed as <code className="text-zinc-500">((views ÷ 2) ÷ 1000) × RPM</code> in <strong>EUR per 1,000 estimated monetized views</strong> (then converted for display). Sheet <strong>costs</strong> in the window stay; editor/VA/sub are still added on top. Saved in this browser.
             </p>
             <div className="mt-2 flex flex-wrap items-end gap-2">
               <label className="flex flex-col gap-1 text-xs text-zinc-400">
@@ -1182,19 +1172,19 @@ export default function AdminPage() {
                       <strong className="text-zinc-400">Manual RPM (EUR):</strong> chart and
                       channel/total revenue use{" "}
                       <code className="text-zinc-400">channelanalytics</code>{" "}
-                      <strong>engaged_views</strong> × your RPM (EUR/1k). Costs still from the
+                      <strong>(views ÷ 2)</strong> × your RPM (EUR/1k). Costs still from the
                       sheet + computed editor/VA/sub.
                     </>
                   ) : data.dailyRevenueSource === "views_rpm_eur" ? (
                     <>
-                      <strong className="text-zinc-400">Engaged views × RPM (EUR):</strong> from{" "}
+                      <strong className="text-zinc-400">Estimated monetized views × RPM (EUR):</strong> from{" "}
                       <code className="text-zinc-400">adminViewsRpmEur</code> in{" "}
                       <code className="text-zinc-400">channels.config.json</code> — same basis as
                       per-channel revenue and totals.
                     </>
                   ) : data.dailyRevenueSource === "views_rpm_usd" ? (
                     <>
-                      <strong className="text-zinc-400">Engaged views × RPM (USD, legacy):</strong>{" "}
+                      <strong className="text-zinc-400">Estimated monetized views × RPM (USD, legacy):</strong>{" "}
                       <code className="text-zinc-400">adminViewsRpmUsd</code> in config — same basis
                       as per-channel revenue and totals.
                     </>

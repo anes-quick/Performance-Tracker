@@ -80,11 +80,11 @@ Daily views go to **`channelanalytics`** via:
 .venv/bin/python -m scraper.run_channel_analytics_views
 ```
 
-(same env vars + OAuth token.) These are YouTube Analytics **daily views** and **engaged_views** (past initial seconds) per channel (Pacific “day”, same as Studio). **/admin** RPM prefers **`engaged_views` when it is &gt; 0**; if the API wrote **0** for engaged but **views** is non-zero (common for some channels, e.g. Shorts-heavy), RPM uses **`views`** so totals are not zeroed out.
+(same env vars + OAuth token.) These are YouTube Analytics **daily views** and **engaged_views** (past initial seconds) per channel (Pacific “day”, same as Studio). For now, **/admin RPM estimates monetized views as `views / 2`** (temporary approximation) because engaged/active values are unreliable in this setup.
 
-### Optional: RPM-based **revenue** on `/admin` (engaged views)
+### Optional: RPM-based **revenue** on `/admin` (estimated monetized views)
 
-Prefer **`adminViewsRpmEur`**: **EUR per 1,000 engaged views**. When enabled (or when you set **manual RPM** on `/admin`), the API recomputes **per-channel revenue**, **totals**, and the **daily chart** as **(monetization views ÷ 1000) × RPM**, using **`channelanalytics`**: **engaged_views if &gt; 0, else views**. **Costs** in the window still come from **`adminfinance`**; editor / VA / subscription are still added from config.
+Prefer **`adminViewsRpmEur`**: **EUR per 1,000 estimated monetized views**. When enabled (or when you set **manual RPM** on `/admin`), the API recomputes **per-channel revenue**, **totals**, and the **daily chart** as **(((views ÷ 2) ÷ 1000) × RPM)** using **`channelanalytics`**. **Costs** in the window still come from **`adminfinance`**; editor / VA / subscription are still added from config.
 
 ```json
 "adminViewsRpmEur": {
