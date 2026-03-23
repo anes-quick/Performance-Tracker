@@ -10,6 +10,8 @@ type ChannelAnalyticsRow = {
   channel_id: string;
   channel_name: string;
   views: number;
+  /** YouTube Analytics engagedViews when column E is present */
+  engaged_views?: number;
 };
 
 type ChannelAnalyticsResponse = {
@@ -45,7 +47,7 @@ export async function GET(request: NextRequest) {
     const [analyticsRes, videoStatsRes] = await Promise.all([
       sheets.spreadsheets.values.get({
         spreadsheetId: cfg.spreadsheetId,
-        range: `'${tab}'!A2:D10000`,
+        range: `'${tab}'!A2:E10000`,
       }),
       sheets.spreadsheets.values.get({
         spreadsheetId: cfg.spreadsheetId,
@@ -73,18 +75,30 @@ export async function GET(request: NextRequest) {
     const channelsSet = new Set<string>();
 
     for (const row of rowsRaw) {
-      // A=date, B=channel_id, C=channel_name, D=views
+      // A=date, B=channel_id, C=channel_name, D=views, E=engaged_views
       const date = String(row[0] ?? "").trim();
       const channel_id = String(row[1] ?? "").trim();
       const channel_name = String(row[2] ?? "").trim();
       const views = Number(row[3] ?? 0) || 0;
+      const engagedRaw =
+        row.length >= 5 ? Number(row[4] ?? "") : Number.NaN;
+      const engaged_views =
+        Number.isFinite(engagedRaw) && engagedRaw >= 0
+          ? engagedRaw
+          : undefined;
       if (!date || !channel_id || !channel_name) continue;
       if (fromStr && date < fromStr) continue;
       if (toStr && date > toStr) continue;
       if (channel && channel !== "All channels" && channel_name !== channel) continue;
 
       channelsSet.add(channel_name);
-      series.push({ date, channel_id, channel_name, views });
+      series.push({
+        date,
+        channel_id,
+        channel_name,
+        views,
+        ...(engaged_views !== undefined ? { engaged_views } : {}),
+      });
     }
 
     series.sort((a, b) => a.date.localeCompare(b.date));

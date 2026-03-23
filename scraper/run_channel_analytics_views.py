@@ -7,15 +7,22 @@ Current columns:
   channel_id
   channel_name
   views
+  engaged_views  (YouTube Analytics engagedViews; may be 0 while views > 0 on some channels — /admin RPM falls back to views)
 
 This script supports "incremental" runs for multiple OAuth tokens:
 - It merges new rows for the selected date range into `channelanalytics`
   instead of wiping the tab completely.
 
 Run:
-  export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"
-  export YOUTUBE_API_KEY="..."
   .venv/bin/python -m scraper.run_channel_analytics_views
+
+Put ``YOUTUBE_API_KEY`` in ``scraper/.env`` or ``frontend/.env.local`` (loaded automatically),
+or ``export YOUTUBE_API_KEY=...`` in the shell.
+
+Sheets auth (first match wins): GOOGLE_SERVICE_ACCOUNT_JSON, _BASE64,
+GOOGLE_APPLICATION_CREDENTIALS if the file exists, else a **local** JSON in the
+repo root: LOCAL_GOOGLE_APPLICATION_CREDENTIALS, service-account.json,
+google-service-account.json, or neon-feat*.json (see scraper/sheets.py).
 """
 
 from __future__ import annotations
@@ -31,6 +38,25 @@ from .analytics_oauth import load_oauth_credentials
 from .config import load_config
 from .youtube_client import resolve_channel_id
 from .sheets import _get_sheets_service  # service account sheets client
+
+
+def _load_local_env() -> None:
+    """
+    Load env files so YOUTUBE_API_KEY etc. work without exporting in the shell.
+    Tries: scraper/.env, frontend/.env.local, repo .env (same idea as scraper/run.py).
+    """
+    try:
+        from pathlib import Path
+
+        from dotenv import load_dotenv
+
+        scraper_dir = Path(__file__).resolve().parent
+        root = scraper_dir.parent
+        load_dotenv(scraper_dir / ".env")
+        load_dotenv(root / "frontend" / ".env.local")
+        load_dotenv(root / ".env")
+    except ImportError:
+        pass
 
 
 DEFAULT_TAB = "channelanalytics"
@@ -92,15 +118,31 @@ def _read_existing_rows(sheets, spreadsheet_id: str, tab_name: str) -> List[List
     """Read existing values (including header) from the tab."""
     res = sheets.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range=f"'{tab_name}'!A1:D10000",
+        range=f"'{tab_name}'!A1:E10000",
     ).execute()
     return res.get("values", []) or []
+
+
+def _normalize_analytics_row(row: List[Any]) -> List[Any]:
+    """Ensure 5 data columns: date, channel_id, channel_name, views, engaged_views."""
+    date = str(row[0] or "").strip()
+    channel_id = str(row[1] or "").strip()
+    name = str(row[2] or "").strip()
+    try:
+        views = int(row[3]) if len(row) > 3 and row[3] is not None and str(row[3]).strip() != "" else 0
+    except (TypeError, ValueError):
+        views = 0
+    try:
+        engaged = int(row[4]) if len(row) > 4 and row[4] is not None and str(row[4]).strip() != "" else 0
+    except (TypeError, ValueError):
+        engaged = 0
+    return [date, channel_id, name, views, engaged]
 
 
 def _parse_existing(existing_values: List[List[Any]]) -> Dict[str, List[Any]]:
     """
     Parse existing rows into a map keyed by f"{date}|{channel_id}".
-    Value is the row shape: [date, channel_id, channel_name, views]
+    Value is the row shape: [date, channel_id, channel_name, views, engaged_views]
     """
     out: Dict[str, List[Any]] = {}
     for row in existing_values[1:]:  # skip header row
@@ -110,7 +152,7 @@ def _parse_existing(existing_values: List[List[Any]]) -> Dict[str, List[Any]]:
         channel_id = str(row[1] or "").strip()
         if not date or not channel_id:
             continue
-        out[f"{date}|{channel_id}"] = row[:4]
+        out[f"{date}|{channel_id}"] = _normalize_analytics_row(row)
     return out
 
 
@@ -164,15 +206,15 @@ def _fetch_daily_views(analytics_service, channel_id: str, start_date: str, end_
 
 def _fetch_daily_views_by_channel(analytics_service, start_date: str, end_date: str) -> List[Dict[str, Any]]:
     """
-    Fetch daily views split by channel using ids=channel==MINE.
-    Dimensions order we expect: day, channel
-    Rows: [day, channelId, views]
+    Fetch daily views + engagedViews per channel (ids=channel==MINE).
+    Dimensions: day, channel — metrics: views, engagedViews
+    Rows: [day, channelId, views, engagedViews]
     """
     request = analytics_service.reports().query(
         ids="channel==MINE",
         startDate=start_date,
         endDate=end_date,
-        metrics="views",
+        metrics="views,engagedViews",
         dimensions="day,channel",
     )
     response = request.execute()
@@ -184,11 +226,20 @@ def _fetch_daily_views_by_channel(analytics_service, start_date: str, end_date: 
         day = row[0]
         channel_id = row[1]
         views = int(row[2]) if row[2] is not None else 0
-        out.append({"date": day, "channel_id": channel_id, "views": views})
+        engaged = int(row[3]) if len(row) > 3 and row[3] is not None else 0
+        out.append(
+            {
+                "date": day,
+                "channel_id": channel_id,
+                "views": views,
+                "engaged_views": engaged,
+            }
+        )
     return out
 
 
 def run(days: int = 28, tab_name: str = DEFAULT_TAB) -> None:
+    _load_local_env()
     config = load_config()
     spreadsheet_id = config["spreadsheetId"]
     channels = config.get("channels", [])
@@ -203,7 +254,7 @@ def run(days: int = 28, tab_name: str = DEFAULT_TAB) -> None:
     sheets = _get_sheets_service()
     _ensure_tab_exists(sheets, spreadsheet_id, tab_name)
 
-    headers = ["date", "channel_id", "channel_name", "views"]
+    headers = ["date", "channel_id", "channel_name", "views", "engaged_views"]
     existing_values = _read_existing_rows(sheets, spreadsheet_id, tab_name)
     existing_map = _parse_existing(existing_values)
     # Resolve allowed channel IDs from our config, so we only keep those channels
@@ -228,7 +279,15 @@ def run(days: int = 28, tab_name: str = DEFAULT_TAB) -> None:
         if allowed and cid not in allowed:
             continue
         kept += 1
-        out_rows.append([d["date"], cid, allowed.get(cid, cid), d["views"]])
+        out_rows.append(
+            [
+                d["date"],
+                cid,
+                allowed.get(cid, cid),
+                d["views"],
+                d["engaged_views"],
+            ]
+        )
 
     print(f"Kept {kept} rows for configured channels")
 
@@ -236,7 +295,7 @@ def run(days: int = 28, tab_name: str = DEFAULT_TAB) -> None:
     for row in out_rows:
         date = str(row[0]).strip()
         channel_id = str(row[1]).strip()
-        updated_map[f"{date}|{channel_id}"] = row[:4]
+        updated_map[f"{date}|{channel_id}"] = _normalize_analytics_row(row)
 
     merged_rows = list(updated_map.values())
     merged_rows.sort(key=lambda r: (str(r[0]), str(r[1])))

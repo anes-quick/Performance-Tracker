@@ -24,6 +24,8 @@ frontend/.env*.local
 # Local GCP / service account JSON (use Railway/Vercel secrets in prod)
 neon-feat*.json
 *-service-account*.json
+service-account.json
+google-service-account.json
 
 # OS / editor
 .DS_Store

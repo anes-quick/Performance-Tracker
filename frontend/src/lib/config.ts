@@ -6,6 +6,8 @@ type ChannelConfig = {
   name: string;
   niche?: string;
   url?: string;
+  /** YouTube channel id (UC…) — matches `channelanalytics` col B when `channel_name` is blank */
+  youtubeChannelId?: string;
 };
 
 export type AppConfig = {
@@ -44,6 +46,22 @@ export type AppConfig = {
    * Keys match channel display names (e.g. "CrazyMomente").
    */
   adminChannelRevenueSplits?: Record<string, { yourPercent: number }>;
+  /**
+   * Admin RPM from **engaged views** (`channelanalytics`): drives **per-channel revenue,
+   * totals, and the daily chart** when enabled (or when `rpmEur` query is sent).
+   * Values are **EUR per 1,000 engaged views**; internally converted via FX like sheet rows.
+   */
+  adminViewsRpmEur?: {
+    default: number;
+    byChannel?: Record<string, number>;
+  };
+  /**
+   * @deprecated Prefer `adminViewsRpmEur`. **USD per 1k** engaged views (legacy).
+   */
+  adminViewsRpmUsd?: {
+    default: number;
+    byChannel?: Record<string, number>;
+  };
   scrapeTimeUtc?: string;
   channels: ChannelConfig[];
 };

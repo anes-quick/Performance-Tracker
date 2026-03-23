@@ -3,6 +3,9 @@ import base64
 import binascii
 import json
 import os
+from pathlib import Path
+from typing import List, Optional
+
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -28,6 +31,71 @@ VIDEOSTATS_HEADERS = [
     "source_id",
     "source_channel_name",
 ]
+
+
+def _project_root() -> Path:
+    """Repo root (parent of the `scraper` package)."""
+    return Path(__file__).resolve().parent.parent
+
+
+def _is_service_account_json_file(path: str) -> bool:
+    if not os.path.isfile(path):
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return (
+            isinstance(data, dict)
+            and data.get("type") == "service_account"
+            and "private_key" in data
+        )
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+
+
+def _local_service_account_file_candidates() -> List[str]:
+    """
+    For local dev when Railway/Vercel-style env vars are not set (or
+    GOOGLE_APPLICATION_CREDENTIALS points at a path that only existed on another machine).
+
+    Tries, in order:
+    - LOCAL_GOOGLE_APPLICATION_CREDENTIALS (absolute or relative to repo root)
+    - service-account.json
+    - google-service-account.json
+    - neon-feat-489318-r3-18ed3ecc014d.json (legacy name in this project)
+    - any neon-feat*.json in repo root (first match by sorted name)
+    """
+    root = _project_root()
+    out: List[str] = []
+
+    local = (os.environ.get("LOCAL_GOOGLE_APPLICATION_CREDENTIALS") or "").strip()
+    if local:
+        p = Path(local)
+        out.append(str(p if p.is_absolute() else (root / local)))
+
+    for name in (
+        "service-account.json",
+        "google-service-account.json",
+        "neon-feat-489318-r3-18ed3ecc014d.json",
+    ):
+        out.append(str(root / name))
+
+    try:
+        for p in sorted(root.glob("neon-feat*.json")):
+            s = str(p)
+            if s not in out:
+                out.append(s)
+    except OSError:
+        pass
+
+    return out
+
+
+def _resolve_local_service_account_path() -> Optional[str]:
+    for path in _local_service_account_file_candidates():
+        if _is_service_account_json_file(path):
+            return path
+    return None
 
 
 def _credentials_from_json_blob(json_blob: str, source_label: str):
@@ -73,31 +141,41 @@ def _get_sheets_service():
             creds_path, scopes=scopes
         )
     else:
-        hints = []
-        if creds_path:
-            if creds_path.startswith("/Users/") or creds_path.startswith("/home/"):
-                hints.append(
-                    f"GOOGLE_APPLICATION_CREDENTIALS points to {creds_path!r} — that path "
-                    "exists on your laptop, not inside Railway/Docker. "
-                    "Add GOOGLE_SERVICE_ACCOUNT_JSON (full JSON) or "
-                    "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 in Railway Variables."
-                )
-            elif not os.path.isfile(creds_path):
-                hints.append(
-                    f"GOOGLE_APPLICATION_CREDENTIALS is {creds_path!r} but that file is missing in the container."
-                )
-        else:
-            hints.append(
-                "No GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 in the environment."
+        local_sa = _resolve_local_service_account_path()
+        if local_sa:
+            credentials = service_account.Credentials.from_service_account_file(
+                local_sa, scopes=scopes
             )
-        msg = (
-            "Google Sheets credentials missing. In Railway: add variable "
-            "GOOGLE_SERVICE_ACCOUNT_JSON with the full service account JSON, "
-            "or GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 (base64 of that file, one line). "
-        )
-        if hints:
-            msg += " ".join(hints)
-        raise RuntimeError(msg)
+        else:
+            hints = []
+            if creds_path:
+                if creds_path.startswith("/Users/") or creds_path.startswith("/home/"):
+                    hints.append(
+                        f"GOOGLE_APPLICATION_CREDENTIALS points to {creds_path!r} — that path "
+                        "exists on your laptop, not inside Railway/Docker. "
+                        "Add GOOGLE_SERVICE_ACCOUNT_JSON (full JSON) or "
+                        "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 in Railway Variables."
+                    )
+                elif not os.path.isfile(creds_path):
+                    hints.append(
+                        f"GOOGLE_APPLICATION_CREDENTIALS is {creds_path!r} but that file is missing. "
+                        "For local runs, put a service account JSON in the project root as "
+                        "service-account.json or neon-feat*.json, or set LOCAL_GOOGLE_APPLICATION_CREDENTIALS."
+                    )
+            else:
+                hints.append(
+                    "No GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 in the environment. "
+                    "For local runs, add service-account.json (or neon-feat*.json) in the project root, "
+                    "or set LOCAL_GOOGLE_APPLICATION_CREDENTIALS."
+                )
+            msg = (
+                "Google Sheets credentials missing. In Railway: add variable "
+                "GOOGLE_SERVICE_ACCOUNT_JSON with the full service account JSON, "
+                "or GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 (base64 of that file, one line). "
+            )
+            if hints:
+                msg += " ".join(hints)
+            raise RuntimeError(msg)
     return build("sheets", "v4", credentials=credentials)
 
 

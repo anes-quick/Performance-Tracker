@@ -3,7 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { signIn, signOut, useSession } from "next-auth/react";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { buildAdminFinanceExportTsv } from "@/lib/adminFinanceExport";
+import { formatChartDateLabel } from "@/lib/formatChartDate";
 import {
   pacificMonthOptions,
   previousPacificMonthRange,
@@ -66,6 +76,22 @@ type FinancialsResponse = {
   };
   totals: { revenue: number; costs: number; profit: number };
   byChannel: Record<string, ApiChannelAgg>;
+  /** One row per calendar day in the selected window (sheet data; no pencil overrides). */
+  dailySeries?: { date: string; revenue: number; costs: number; profit: number }[];
+  /** How daily chart revenue is built; when RPM modes are on, channel totals match the same model. */
+  dailyRevenueSource?:
+    | "sheet"
+    | "views_rpm_usd"
+    | "views_rpm_eur"
+    | "manual_rpm_eur";
+  /** Same as dailyRevenueSource for the successful response (explicit label for UI). */
+  revenueEstimateMode?:
+    | "sheet"
+    | "views_rpm_usd"
+    | "views_rpm_eur"
+    | "manual_rpm_eur";
+  /** Per day: sum of engaged_views (col E) when scraped; else legacy `views` (col D). Used for RPM. */
+  dailyViewsSeries?: { date: string; views: number }[];
   message?: string | null;
   info?: string | null;
   error?: string;
@@ -87,6 +113,16 @@ function formatMoneyDetail(n: number, currency: "EUR" | "USD") {
     currency,
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
+  }).format(n);
+}
+
+function formatMoneyCompact(n: number, currency: "EUR" | "USD") {
+  const locale = currency === "USD" ? "en-US" : "de-DE";
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency,
+    notation: "compact",
+    maximumFractionDigits: 1,
   }).format(n);
 }
 
@@ -142,6 +178,18 @@ function normalizeChannelNameLocal(raw: string): string {
   return String(raw ?? "")
     .trim()
     .replace(/\s+/g, " ");
+}
+
+/** Delays value updates (e.g. RPM query param) so typing doesn’t refetch every keystroke. */
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setDebounced(value);
+    }, delayMs);
+    return () => window.clearTimeout(t);
+  }, [value, delayMs]);
+  return debounced;
 }
 
 /** Your share multiplier 0–1 from channels.config.json adminChannelRevenueSplits */
@@ -280,10 +328,16 @@ function ComputedCostsSection({
   cc,
   fx,
   cur,
+  manualRpmInput,
+  onManualRpmChange,
+  onClearManualRpm,
 }: {
-  cc: ComputedCostsPayload;
+  cc: ComputedCostsPayload | null;
   fx: NonNullable<FinancialsResponse["fx"]>;
   cur: "EUR" | "USD";
+  manualRpmInput: string;
+  onManualRpmChange: (value: string) => void;
+  onClearManualRpm: () => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -295,7 +349,9 @@ function ComputedCostsSection({
         className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left transition hover:bg-zinc-800/40"
         aria-expanded={open}
       >
-        <span className="text-sm font-semibold text-zinc-200">Computed costs</span>
+        <span className="text-sm font-semibold text-zinc-200">
+          Computed costs &amp; manual RPM
+        </span>
         <ChevronDownIcon
           className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform duration-200 ${
             open ? "rotate-180" : ""
@@ -304,10 +360,12 @@ function ComputedCostsSection({
       </button>
       {open ? (
         <div className="border-t border-zinc-800 px-4 pb-4 pt-3">
+          {cc ? (
+            <>
           {cc.periodDays === 0 && (
             <p className="mb-3 text-xs text-amber-600/90">
               0-day proration → no VA/sub in this view; check{" "}
-              <code className="text-zinc-400">videostatsraw</code> or use 28d/30d/custom
+              <code className="text-zinc-400">videostatsraw</code> or use 28d/7d/custom
               range.
             </p>
           )}
@@ -390,24 +448,77 @@ function ComputedCostsSection({
               </ul>
             </div>
           </div>
+            </>
+          ) : (
+            <p className="mb-3 text-xs text-zinc-500">
+              No <code className="text-zinc-400">adminComputedCosts</code> in{" "}
+              <code className="text-zinc-400">channels.config.json</code> — editor/VA
+              breakdown is hidden. Manual RPM below still works.
+            </p>
+          )}
+          <div className={`border-t border-zinc-800 pt-4 ${cc ? "mt-6" : "mt-0"}`}>
+            <h3 className="text-xs font-medium uppercase text-zinc-500">
+              Manual RPM (EUR / 1k engaged views)
+            </h3>
+            <p className="mt-1 text-xs text-zinc-600">
+              Uses YouTube Analytics <strong className="text-zinc-500">engaged_views</strong>{" "}
+              (monetization basis; column <code className="text-zinc-500">engaged_views</code> in{" "}
+              <code className="text-zinc-500">channelanalytics</code>
+              ) when the views scraper has run after the sheet upgrade. Older rows fall back to
+              total <code className="text-zinc-500">views</code>. When RPM &gt; 0,{" "}
+              <strong className="text-zinc-500">per-channel revenue and top-line totals</strong>{" "}
+              are recomputed as{" "}
+              <code className="text-zinc-500">(engaged ÷ 1000) × RPM</code> in{" "}
+              <strong>EUR per 1,000 views</strong> (then converted for display). Sheet{" "}
+              <strong>costs</strong> in the window stay; editor/VA/sub are still added on top.
+              Saved in this browser.
+            </p>
+            <div className="mt-2 flex flex-wrap items-end gap-2">
+              <label className="flex flex-col gap-1 text-xs text-zinc-400">
+                RPM (EUR / 1k engaged views)
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={manualRpmInput}
+                  onChange={(e) => onManualRpmChange(e.target.value)}
+                  placeholder="e.g. 2.5 — leave empty to off"
+                  className="w-44 rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={onClearManualRpm}
+                className="rounded border border-zinc-600 px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </section>
   );
 }
 
+const MANUAL_RPM_STORAGE_KEY = "performance-tracker-admin-manual-rpm-eur-v1";
+const MANUAL_RPM_STORAGE_KEY_LEGACY_USD =
+  "performance-tracker-admin-manual-rpm-usd-v1";
+
 export default function AdminPage() {
   const { data: session, status } = useSession();
   const [data, setData] = useState<FinancialsResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const dataLoadedRef = useRef(false);
   const [username, setUsername] = useState("anes");
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loginSubmitting, setLoginSubmitting] = useState(false);
   const [displayCurrency, setDisplayCurrency] = useState<"EUR" | "USD">("EUR");
   /** Preset rolling days, all rows, or custom start/end (Pacific dates). */
-  const [periodPreset, setPeriodPreset] = useState<"28" | "30" | "all" | "custom">(
+  const [periodPreset, setPeriodPreset] = useState<"28" | "7" | "all" | "custom">(
     "28"
   );
   /** When `periodPreset === "custom"`, inclusive YYYY-MM-DD (Pacific). */
@@ -430,6 +541,36 @@ export default function AdminPage() {
   const [sheetExportStatus, setSheetExportStatus] = useState<
     "idle" | "copied" | "error"
   >("idle");
+  const [manualRpmInput, setManualRpmInput] = useState("");
+  const debouncedRpmForFetch = useDebouncedValue(manualRpmInput, 450);
+
+  useEffect(() => {
+    try {
+      const s = localStorage.getItem(MANUAL_RPM_STORAGE_KEY);
+      if (s) {
+        setManualRpmInput(s);
+        return;
+      }
+      const legacy = localStorage.getItem(MANUAL_RPM_STORAGE_KEY_LEGACY_USD);
+      if (legacy) {
+        setManualRpmInput(legacy);
+        localStorage.setItem(MANUAL_RPM_STORAGE_KEY, legacy);
+        localStorage.removeItem(MANUAL_RPM_STORAGE_KEY_LEGACY_USD);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const t = manualRpmInput.trim();
+      if (t) localStorage.setItem(MANUAL_RPM_STORAGE_KEY, t);
+      else localStorage.removeItem(MANUAL_RPM_STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, [manualRpmInput]);
 
   useEffect(() => {
     try {
@@ -456,10 +597,16 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (status !== "authenticated") return;
+    let cancelled = false;
     async function load() {
+      const first = !dataLoadedRef.current;
+      if (first) {
+        setIsInitialLoading(true);
+      } else {
+        setIsRefreshing(true);
+      }
+      setLoadError(null);
       try {
-        setLoading(true);
-        setLoadError(null);
         const params = new URLSearchParams();
         params.set("display", displayCurrency);
         if (periodPreset === "custom" && customRange) {
@@ -471,22 +618,47 @@ export default function AdminPage() {
             periodPreset === "custom" ? "28" : periodPreset
           );
         }
+        let t = debouncedRpmForFetch.trim().replace(/\s/g, "");
+        if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
+        const rpmEur = parseFloat(t);
+        if (Number.isFinite(rpmEur) && rpmEur > 0) {
+          params.set("rpmEur", String(rpmEur));
+        }
         const res = await fetch(`/api/admin/financials?${params.toString()}`);
         const json = (await res.json()) as FinancialsResponse & { error?: string };
         if (!res.ok) {
           setLoadError(json.error ?? "Failed to load");
-          setData(null);
+          if (!dataLoadedRef.current) {
+            setData(null);
+          }
           return;
         }
+        if (cancelled) return;
         setData(json);
+        dataLoadedRef.current = true;
       } catch {
         setLoadError("Failed to load financials");
+        if (!dataLoadedRef.current) {
+          setData(null);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setIsInitialLoading(false);
+          setIsRefreshing(false);
+        }
       }
     }
-    load();
-  }, [status, displayCurrency, periodPreset, customRange]);
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    status,
+    displayCurrency,
+    periodPreset,
+    customRange,
+    debouncedRpmForFetch,
+  ]);
 
   function openCustomPeriodDialog() {
     if (periodPreset === "custom" && customRange) {
@@ -517,7 +689,7 @@ export default function AdminPage() {
     customPeriodDialogRef.current?.close();
   }
 
-  function selectPreset(p: "28" | "30" | "all") {
+  function selectPreset(p: "28" | "7" | "all") {
     setPeriodPreset(p);
     setCustomRange(null);
   }
@@ -643,7 +815,7 @@ export default function AdminPage() {
   }
 
   async function copyStructuredSheetExport() {
-    if (!data?.fx || loading) return;
+    if (!data?.fx || isInitialLoading) return;
     try {
       const tsv = buildAdminFinanceExportTsv({
         generatedAtIso: new Date().toISOString(),
@@ -786,6 +958,17 @@ export default function AdminPage() {
               </span>
               <button
                 type="button"
+                onClick={() => selectPreset("7")}
+                className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                  periodPreset === "7"
+                    ? "bg-violet-600 text-white"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                7d
+              </button>
+              <button
+                type="button"
                 onClick={() => selectPreset("28")}
                 className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
                   periodPreset === "28"
@@ -794,17 +977,6 @@ export default function AdminPage() {
                 }`}
               >
                 28d
-              </button>
-              <button
-                type="button"
-                onClick={() => selectPreset("30")}
-                className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
-                  periodPreset === "30"
-                    ? "bg-violet-600 text-white"
-                    : "text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                30d
               </button>
               <button
                 type="button"
@@ -856,7 +1028,7 @@ export default function AdminPage() {
             </div>
             <button
               type="button"
-              disabled={!data?.fx || loading}
+              disabled={!data?.fx || isInitialLoading}
               title="Copies tab-separated text — paste into Google Sheets cell A1 or into Claude. Uses the numbers currently on this page (period, currency, overrides)."
               onClick={() => void copyStructuredSheetExport()}
               className="rounded-full border border-emerald-800/80 bg-emerald-950/40 px-4 py-1.5 text-sm text-emerald-200 hover:bg-emerald-900/50 disabled:cursor-not-allowed disabled:opacity-40"
@@ -904,8 +1076,13 @@ export default function AdminPage() {
           </div>
         )}
 
-        {loading && (
+        {isInitialLoading && !data && (
           <p className="text-sm text-zinc-500">Loading financial data…</p>
+        )}
+        {isRefreshing && data && (
+          <p className="text-xs text-zinc-500" aria-live="polite">
+            Updating numbers…
+          </p>
         )}
 
         {data?.message && (
@@ -920,7 +1097,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {data && !loading && (
+        {data && (
           <>
             <section className="grid gap-4 sm:grid-cols-3">
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
@@ -964,20 +1141,8 @@ export default function AdminPage() {
                 </p>
               </div>
             </section>
-            {data && (
-              <p className="-mt-2 text-xs text-zinc-500">
-                {data.computedCosts
-                  ? "Top-line revenue is gross. Costs column includes partner share + sheet + editor, VA, subscriptions (below). "
-                  : ""}
-                Revenue overrides (pencil) are{" "}
-                <strong>gross</strong> (Studio total); saved in this browser (
-                <code className="text-zinc-400">localStorage</code>). Partner % from{" "}
-                <code className="text-zinc-400">adminChannelRevenueSplits</code> is counted as{" "}
-                <strong>cost</strong> so profit = full revenue − ops − partner.
-              </p>
-            )}
 
-            {data.computedCosts && data.fx && (
+            {data.fx && (
               <ComputedCostsSection
                 key={
                   data.revenueWindow?.mode === "custom" &&
@@ -989,10 +1154,129 @@ export default function AdminPage() {
                       ? `r:${data.revenueWindow.days}`
                       : "all"
                 }
-                cc={data.computedCosts}
+                cc={data.computedCosts ?? null}
                 fx={data.fx}
                 cur={cur}
+                manualRpmInput={manualRpmInput}
+                onManualRpmChange={setManualRpmInput}
+                onClearManualRpm={() => {
+                  setManualRpmInput("");
+                  try {
+                    localStorage.removeItem(MANUAL_RPM_STORAGE_KEY);
+                    localStorage.removeItem(MANUAL_RPM_STORAGE_KEY_LEGACY_USD);
+                  } catch {
+                    /* ignore */
+                  }
+                }}
               />
+            )}
+
+            {Array.isArray(data.dailySeries) && data.dailySeries.length > 0 ? (
+              <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+                <h2 className="text-sm font-semibold text-zinc-200">
+                  Daily estimated revenue
+                </h2>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {data.dailyRevenueSource === "manual_rpm_eur" ? (
+                    <>
+                      <strong className="text-zinc-400">Manual RPM (EUR):</strong> chart and
+                      channel/total revenue use{" "}
+                      <code className="text-zinc-400">channelanalytics</code>{" "}
+                      <strong>engaged_views</strong> × your RPM (EUR/1k). Costs still from the
+                      sheet + computed editor/VA/sub.
+                    </>
+                  ) : data.dailyRevenueSource === "views_rpm_eur" ? (
+                    <>
+                      <strong className="text-zinc-400">Engaged views × RPM (EUR):</strong> from{" "}
+                      <code className="text-zinc-400">adminViewsRpmEur</code> in{" "}
+                      <code className="text-zinc-400">channels.config.json</code> — same basis as
+                      per-channel revenue and totals.
+                    </>
+                  ) : data.dailyRevenueSource === "views_rpm_usd" ? (
+                    <>
+                      <strong className="text-zinc-400">Engaged views × RPM (USD, legacy):</strong>{" "}
+                      <code className="text-zinc-400">adminViewsRpmUsd</code> in config — same basis
+                      as per-channel revenue and totals.
+                    </>
+                  ) : (
+                    <>
+                      One point per day from the finance sheet (same Pacific window
+                      as totals). Pencil overrides are not applied here.
+                    </>
+                  )}
+                </p>
+                <div className="mt-4 h-[300px] w-full min-h-[240px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={data.dailySeries}>
+                      <CartesianGrid stroke="#3f3f46" vertical={false} />
+                      <XAxis
+                        dataKey="date"
+                        minTickGap={20}
+                        tick={{ fontSize: 11, fill: "#a1a1aa" }}
+                        tickFormatter={(v) => formatChartDateLabel(String(v))}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 11, fill: "#a1a1aa" }}
+                        width={56}
+                        tickFormatter={(v) =>
+                          formatMoneyCompact(Number(v), cur)
+                        }
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#18181b",
+                          border: "1px solid #3f3f46",
+                          borderRadius: "8px",
+                          fontSize: "12px",
+                        }}
+                        labelStyle={{ color: "#e4e4e7" }}
+                        labelFormatter={(label) =>
+                          formatChartDateLabel(String(label))
+                        }
+                        formatter={(value) => [
+                          formatMoneyDetail(Number(value), cur),
+                          "Revenue",
+                        ]}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="revenue"
+                        name="Revenue"
+                        stroke="#34d399"
+                        strokeWidth={2}
+                        dot={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </section>
+            ) : (
+              <section className="rounded-2xl border border-dashed border-zinc-700 bg-zinc-900/20 p-4">
+                <h2 className="text-sm font-semibold text-zinc-300">
+                  Daily chart
+                </h2>
+                <p className="mt-1 text-xs text-zinc-500">
+                  No days in this period yet. Run{" "}
+                  <code className="text-zinc-400">python -m scraper.run_channel_analytics_views</code>{" "}
+                  so <code className="text-zinc-400">channelanalytics</code> has{" "}
+                  <code className="text-zinc-400">engaged_views</code> (and views), or add dated
+                  rows to <code className="text-zinc-400">adminfinance</code> for sheet-only
+                  charting.
+                </p>
+              </section>
+            )}
+
+            {data && (
+              <p className="-mt-2 text-xs text-zinc-500">
+                {data.computedCosts
+                  ? "Top-line revenue is gross. Costs column includes partner share + sheet + editor, VA, subscriptions (below). "
+                  : ""}
+                Revenue overrides (pencil) are{" "}
+                <strong>gross</strong> (Studio total); saved in this browser (
+                <code className="text-zinc-400">localStorage</code>). Partner % from{" "}
+                <code className="text-zinc-400">adminChannelRevenueSplits</code> is counted as{" "}
+                <strong>cost</strong> so profit = full revenue − ops − partner.
+              </p>
             )}
 
             <section className="rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4">
