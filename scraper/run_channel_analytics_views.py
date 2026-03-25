@@ -34,7 +34,10 @@ from zoneinfo import ZoneInfo
 
 from googleapiclient.discovery import build
 
-from .analytics_oauth import load_oauth_credentials
+from .analytics_oauth import (
+    credentials_from_analytics_token_dict,
+    discover_youtube_analytics_token_payloads,
+)
 from .config import load_config
 from .youtube_client import resolve_channel_id
 from .sheets import _get_sheets_service  # service account sheets client
@@ -244,11 +247,11 @@ def run(days: int = 28, tab_name: str = DEFAULT_TAB) -> None:
     spreadsheet_id = config["spreadsheetId"]
     channels = config.get("channels", [])
 
-    creds = load_oauth_credentials()
-    analytics = build("youtubeAnalytics", "v2", credentials=creds)
-
     start_date, end_date = _date_range(days)
     print(f"Scraping YouTube Analytics views: {start_date} → {end_date}")
+
+    token_payloads = discover_youtube_analytics_token_payloads()
+    print(f"Discovered {len(token_payloads)} YouTube Analytics OAuth token(s)")
 
     # Prepare sheet
     sheets = _get_sheets_service()
@@ -270,26 +273,42 @@ def run(days: int = 28, tab_name: str = DEFAULT_TAB) -> None:
 
     out_rows: List[List[Any]] = []
 
-    daily_by_channel = _fetch_daily_views_by_channel(analytics, start_date, end_date)
-    print(f"Analytics returned {len(daily_by_channel)} daily rows (day+channel split)")
-
-    kept = 0
-    for d in daily_by_channel:
-        cid = str(d["channel_id"]).strip()
-        if allowed and cid not in allowed:
+    total_kept = 0
+    for i, payload in enumerate(token_payloads):
+        label = f"token#{i + 1}"
+        try:
+            creds = credentials_from_analytics_token_dict(payload)
+            analytics = build("youtubeAnalytics", "v2", credentials=creds)
+            daily_by_channel = _fetch_daily_views_by_channel(
+                analytics, start_date, end_date
+            )
+        except Exception as e:
+            print(f"[{label}] Skip token (fetch failed): {e}")
             continue
-        kept += 1
-        out_rows.append(
-            [
-                d["date"],
-                cid,
-                allowed.get(cid, cid),
-                d["views"],
-                d["engaged_views"],
-            ]
+
+        kept = 0
+        channels_seen: set[str] = set()
+        for d in daily_by_channel:
+            cid = str(d["channel_id"]).strip()
+            if allowed and cid not in allowed:
+                continue
+            kept += 1
+            channels_seen.add(cid)
+            out_rows.append(
+                [
+                    d["date"],
+                    cid,
+                    allowed.get(cid, cid),
+                    d["views"],
+                    d["engaged_views"],
+                ]
+            )
+        total_kept += kept
+        print(
+            f"[{label}] Analytics returned {len(daily_by_channel)} rows; kept {kept} rows for {len(channels_seen)} configured channel(s)"
         )
 
-    print(f"Kept {kept} rows for configured channels")
+    print(f"Kept {total_kept} total rows for configured channels (all tokens)")
 
     updated_map = dict(existing_map)
     for row in out_rows:
