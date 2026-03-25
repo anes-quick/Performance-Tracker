@@ -10,6 +10,7 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -24,6 +25,7 @@ type OverviewResponse = {
   chart: { date: string; views: number }[];
   channels: string[];
   coverage: { minDate: string; maxDate: string; days: number } | null;
+  chartByChannel?: Record<string, { date: string; views: number }[]>;
 };
 
 type OutlierItem = {
@@ -59,6 +61,7 @@ export function HomeDashboard() {
 
   const [period, setPeriod] = useState<"all" | "7d" | "28d">(initialPeriod);
   const [selectedChannel, setSelectedChannel] = useState<string>("All channels");
+  const [compareChannels, setCompareChannels] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<OverviewResponse | null>(null);
@@ -95,7 +98,9 @@ export function HomeDashboard() {
         setError(null);
         const params = new URLSearchParams();
         params.set("period", period);
-        if (selectedChannel !== "All channels") {
+        if (compareChannels) {
+          params.set("compare", "1");
+        } else if (selectedChannel !== "All channels") {
           params.set("channel", selectedChannel);
         }
         const json = await fetchJsonWithTimeout<OverviewResponse>(
@@ -110,7 +115,7 @@ export function HomeDashboard() {
       }
     }
     load();
-  }, [period, selectedChannel]);
+  }, [period, selectedChannel, compareChannels]);
 
   useEffect(() => {
     if (!outliersOpen) return;
@@ -206,6 +211,7 @@ export function HomeDashboard() {
               <select
                 className="rounded-full border border-zinc-300 bg-white px-3 py-1 text-xs text-zinc-800 shadow-sm"
                 value={selectedChannel}
+                disabled={compareChannels}
                 onChange={(e) => setSelectedChannel(e.target.value)}
               >
                 <option>All channels</option>
@@ -215,6 +221,20 @@ export function HomeDashboard() {
                   </option>
                 ))}
               </select>
+
+              <label className="ml-1 inline-flex items-center gap-2 text-xs font-medium uppercase text-zinc-500">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-emerald-600"
+                  checked={compareChannels}
+                  onChange={(e) => {
+                    const v = e.target.checked;
+                    setCompareChannels(v);
+                    if (v) setSelectedChannel("All channels");
+                  }}
+                />
+                Compare
+              </label>
             </div>
             <div className="flex gap-1 rounded-full bg-zinc-100 p-1 text-xs">
               <button
@@ -323,32 +343,156 @@ export function HomeDashboard() {
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={data.chart}>
-                  <CartesianGrid stroke="#e4e4e7" vertical={false} />
-                  <XAxis
-                    dataKey="date"
-                    minTickGap={20}
-                    tick={{ fontSize: 12 }}
-                    tickFormatter={(v) => formatChartDateLabel(String(v))}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 12 }}
-                    tickFormatter={(v) => formatThousands(Number(v))}
-                  />
-                  <Tooltip
-                    formatter={(value) => [formatThousands(Number(value)), "views"]}
-                    labelFormatter={(label) =>
-                      formatChartDateLabel(String(label))
+                {compareChannels && data.chartByChannel ? (
+                  (() => {
+                    const chartByChannel = data.chartByChannel ?? {};
+                    const channelNames = (data.channels ?? [])
+                      .filter((c) => (chartByChannel[c]?.length ?? 0) > 0)
+                      .slice()
+                      .sort((a, b) => a.localeCompare(b));
+                    if (channelNames.length === 0) {
+                      return (
+                        <LineChart data={data.chart}>
+                          <CartesianGrid stroke="#e4e4e7" vertical={false} />
+                          <XAxis
+                            dataKey="date"
+                            minTickGap={20}
+                            tick={{ fontSize: 12 }}
+                            tickFormatter={(v) =>
+                              formatChartDateLabel(String(v))
+                            }
+                          />
+                          <YAxis
+                            tick={{ fontSize: 12 }}
+                            tickFormatter={(v) => formatThousands(Number(v))}
+                          />
+                          <Tooltip
+                            formatter={(value) => [
+                              formatThousands(Number(value)),
+                              "views",
+                            ]}
+                            labelFormatter={(label) =>
+                              formatChartDateLabel(String(label))
+                            }
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="views"
+                            stroke="#09090b"
+                            strokeWidth={2}
+                            dot={false}
+                          />
+                        </LineChart>
+                      );
                     }
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="views"
-                    stroke="#09090b"
-                    strokeWidth={2}
-                    dot={false}
-                  />
-                </LineChart>
+
+                    const colors = [
+                      "#0f766e",
+                      "#0284c7",
+                      "#7c3aed",
+                      "#d97706",
+                      "#dc2626",
+                      "#16a34a",
+                      "#db2777",
+                      "#0ea5e9",
+                    ];
+
+                    const dateSet = new Set<string>();
+                    for (const name of channelNames) {
+                      for (const p of chartByChannel[name]) {
+                        dateSet.add(p.date);
+                      }
+                    }
+                    const dates = Array.from(dateSet).sort();
+
+                    const viewByChannelByDate: Record<string, Map<string, number>> = {};
+                    for (const name of channelNames) {
+                      viewByChannelByDate[name] = new Map(
+                        (chartByChannel[name] ?? []).map((p) => [p.date, p.views])
+                      );
+                    }
+
+                    const dataKeyByChannel: Record<string, string> = {};
+                    channelNames.forEach((name, idx) => {
+                      dataKeyByChannel[name] = `c${idx}`;
+                    });
+
+                    const chartData = dates.map((date) => {
+                      const obj: Record<string, number | string> = { date };
+                      for (const name of channelNames) {
+                        obj[dataKeyByChannel[name]] =
+                          viewByChannelByDate[name].get(date) ?? 0;
+                      }
+                      return obj;
+                    });
+
+                    return (
+                      <LineChart data={chartData}>
+                        <CartesianGrid stroke="#e4e4e7" vertical={false} />
+                        <XAxis
+                          dataKey="date"
+                          minTickGap={20}
+                          tick={{ fontSize: 12 }}
+                          tickFormatter={(v) =>
+                            formatChartDateLabel(String(v))
+                          }
+                        />
+                        <YAxis
+                          tick={{ fontSize: 12 }}
+                          tickFormatter={(v) => formatThousands(Number(v))}
+                        />
+                        <Tooltip
+                          formatter={(value) => [
+                            formatThousands(Number(value)),
+                            "views",
+                          ]}
+                          labelFormatter={(label) =>
+                            formatChartDateLabel(String(label))
+                          }
+                        />
+                        {channelNames.map((name, idx) => (
+                          <Line
+                            key={name}
+                            type="monotone"
+                            dataKey={dataKeyByChannel[name]}
+                            name={name}
+                            stroke={colors[idx % colors.length]}
+                            strokeWidth={2}
+                            dot={false}
+                          />
+                        ))}
+                        <Legend />
+                      </LineChart>
+                    );
+                  })()
+                ) : (
+                  <LineChart data={data.chart}>
+                    <CartesianGrid stroke="#e4e4e7" vertical={false} />
+                    <XAxis
+                      dataKey="date"
+                      minTickGap={20}
+                      tick={{ fontSize: 12 }}
+                      tickFormatter={(v) =>
+                        formatChartDateLabel(String(v))
+                      }
+                    />
+                    <YAxis
+                      tick={{ fontSize: 12 }}
+                      tickFormatter={(v) => formatThousands(Number(v))}
+                    />
+                    <Tooltip
+                      formatter={(value) => [formatThousands(Number(value)), "views"]}
+                      labelFormatter={(label) => formatChartDateLabel(String(label))}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="views"
+                      stroke="#09090b"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  </LineChart>
+                )}
               </ResponsiveContainer>
             )}
           </div>

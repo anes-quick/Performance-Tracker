@@ -19,6 +19,8 @@ type OverviewResponse = {
   chart: OverviewPoint[];
   channels: string[];
   coverage: { minDate: string; maxDate: string; days: number } | null;
+  /** Optional: when compare=1, per-channel time series for the chart. */
+  chartByChannel?: Record<string, OverviewPoint[]>;
 };
 
 function toISODateUTC(d: Date) {
@@ -37,6 +39,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const period = searchParams.get("period") ?? "28d"; // all | 7d | 28d
     const channel = searchParams.get("channel"); // main_channel_name
+    const compare = ["1", "true", "yes"].includes(String(searchParams.get("compare") ?? "").toLowerCase());
 
     const now = new Date();
     const nowUTC = new Date(`${toISODateUTC(now)}T00:00:00.000Z`);
@@ -98,7 +101,7 @@ export async function GET(request: NextRequest) {
       const pubDate = publishedRaw.slice(0, 10); // YYYY-MM-DD
       if (fromStr && pubDate < fromStr) continue;
       if (toStr && pubDate > toStr) continue;
-      if (channel && channel !== "All channels" && mainChannelName !== channel) {
+      if (channel && !compare && channel !== "All channels" && mainChannelName !== channel) {
         continue;
       }
 
@@ -112,6 +115,7 @@ export async function GET(request: NextRequest) {
 
     // Build chart from channelanalytics: sum views per day across channels
     const byDate = new Map<string, number>();
+    const byChannelDate = compare ? new Map<string, Map<string, number>>() : null;
     for (const row of analyticsRows) {
       const date = String(row[0] ?? "").trim();
       const channelName = String(row[2] ?? "").trim();
@@ -119,8 +123,14 @@ export async function GET(request: NextRequest) {
       if (!date) continue;
       if (fromStr && date < fromStr) continue;
       if (toStr && date > toStr) continue;
-      if (channel && channel !== "All channels" && channelName !== channel) continue;
+      if (channel && !compare && channel !== "All channels" && channelName !== channel) continue;
       byDate.set(date, (byDate.get(date) ?? 0) + views);
+
+      if (compare && channelName) {
+        const inner = byChannelDate!.get(channelName) ?? new Map<string, number>();
+        inner.set(date, (inner.get(date) ?? 0) + views);
+        byChannelDate!.set(channelName, inner);
+      }
     }
 
     const chart = Array.from(byDate.entries())
@@ -136,6 +146,16 @@ export async function GET(request: NextRequest) {
           }
         : null;
 
+    let chartByChannel: Record<string, OverviewPoint[]> | undefined = undefined;
+    if (compare && byChannelDate) {
+      chartByChannel = {};
+      for (const [ch, m] of byChannelDate.entries()) {
+        chartByChannel[ch] = Array.from(m.entries())
+          .map(([date, views]) => ({ date, views }))
+          .sort((a, b) => a.date.localeCompare(b.date));
+      }
+    }
+
     const payload: OverviewResponse = {
       totalViews,
       uploads,
@@ -144,6 +164,7 @@ export async function GET(request: NextRequest) {
       chart,
       channels: Array.from(channelSet).sort(),
       coverage,
+      ...(chartByChannel ? { chartByChannel } : {}),
     };
 
     return NextResponse.json(payload, {
