@@ -43,7 +43,7 @@ from .run_channel_analytics_views import (
     _include_today_pacific,
 )
 from .sheets import _get_sheets_service
-from .youtube_client import resolve_channel_id, resolve_channel_title
+from .youtube_client import resolve_channel_id_from_config_entry, resolve_channel_title
 
 # Must match removal filter and stay stable across runs
 AUTO_NOTE_TAG = "[yt-analytics-estimatedRevenue]"
@@ -310,7 +310,7 @@ def run(days: int = 28) -> None:
     for ch in channels:
         handle = ch.get("handle") or ch.get("name")
         name = ch.get("name") or handle
-        cid = resolve_channel_id(handle)
+        cid = resolve_channel_id_from_config_entry(ch)
         if cid:
             allowed[cid] = name
         else:

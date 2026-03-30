@@ -39,7 +39,7 @@ from .analytics_oauth import (
     discover_youtube_analytics_token_payloads,
 )
 from .config import load_config
-from .youtube_client import resolve_channel_id
+from .youtube_client import resolve_channel_id_from_config_entry
 from .sheets import _get_sheets_service  # service account sheets client
 
 
@@ -265,7 +265,7 @@ def run(days: int = 28, tab_name: str = DEFAULT_TAB) -> None:
     for ch in channels:
         handle = ch.get("handle") or ch.get("name")
         name = ch.get("name") or handle
-        cid = resolve_channel_id(handle)
+        cid = resolve_channel_id_from_config_entry(ch)
         if cid:
             allowed[cid] = name
         else:

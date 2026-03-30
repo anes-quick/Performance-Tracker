@@ -15,7 +15,7 @@ except ImportError:
 from .config import load_config, get_channels
 from .sheets import get_sources_lookup, append_video_stats_rows, append_channel_daily_rows
 from .youtube_client import (
-    resolve_channel_id,
+    resolve_channel_id_from_config_entry,
     get_uploads_playlist_id,
     get_all_recent_videos_for_channel,
     get_channel_stats,
@@ -65,7 +65,7 @@ def run():
         name = ch.get("name", handle)
         niche = ch.get("niche", "")
 
-        channel_id = resolve_channel_id(handle)
+        channel_id = resolve_channel_id_from_config_entry(ch)
         if not channel_id:
             print(f"Skip channel (not found): {name} (@{handle})")
             continue
@@ -103,7 +103,7 @@ def run():
     for ch in channels:
         handle = ch.get("handle") or ch.get("name", "")
         name = ch.get("name", handle)
-        channel_id = resolve_channel_id(handle)
+        channel_id = resolve_channel_id_from_config_entry(ch)
         if not channel_id:
             continue
         stats = get_channel_stats(channel_id)

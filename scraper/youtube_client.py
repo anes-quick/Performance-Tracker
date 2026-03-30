@@ -33,6 +33,19 @@ def resolve_channel_title(channel_id: str):
     return t.strip() or None
 
 
+def resolve_channel_id_from_config_entry(ch: dict):
+    """
+    Prefer explicit youtubeChannelId (UC…) from channels.config.json, else resolve @handle via Data API.
+    """
+    yid = (ch.get("youtubeChannelId") or "").strip()
+    if yid:
+        return yid
+    handle = ch.get("handle") or ch.get("name") or ""
+    if not handle:
+        return None
+    return resolve_channel_id(handle)
+
+
 def resolve_channel_id(handle: str):
     """
     Resolve @handle to YouTube channel ID using channels.list(forHandle=...).
