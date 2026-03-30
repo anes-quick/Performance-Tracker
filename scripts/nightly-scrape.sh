@@ -14,7 +14,7 @@ python -m scraper.run
 echo "[nightly-scrape] Channel analytics views → channelanalytics"
 python -m scraper.run_channel_analytics_views
 
-echo "[nightly-scrape] YouTube Analytics revenue → adminfinance (OAuth tokens required)"
-python -m scraper.run_channel_analytics_revenue
+# Revenue is estimated on /admin via RPM × (views÷2); adminfinance sheet revenue rows are optional/manual.
+# To backfill YouTube estimated revenue locally: python -m scraper.run_channel_analytics_revenue
 
 echo "[nightly-scrape] $(date -u +%Y-%m-%dT%H:%M:%SZ) done"
