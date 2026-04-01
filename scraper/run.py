@@ -13,9 +13,15 @@ except ImportError:
     pass  # env vars can be set in shell or by platform
 
 from .config import load_config, get_channels
-from .sheets import get_sources_lookup, append_video_stats_rows, append_channel_daily_rows
+from .sheets import (
+    get_sources_tracking_maps,
+    backfill_missing_source_channel_names,
+    append_video_stats_rows,
+    append_channel_daily_rows,
+)
 from .youtube_client import (
     resolve_channel_id_from_config_entry,
+    resolve_channel_title,
     get_uploads_playlist_id,
     get_all_recent_videos_for_channel,
     get_channel_stats,
@@ -56,9 +62,25 @@ def run():
     """Main entry: load config, fetch videos per channel, resolve sources, append to sheet."""
     config = load_config()
     channels = get_channels(config)
-    sources_lookup = get_sources_lookup()
+    _names_by_id, channel_id_by_tracking_id, sources_rows_detail = get_sources_tracking_maps()
+    sources_lookup = dict(_names_by_id)
+    title_by_channel_id: dict = {}
     scrape_utc = datetime.now(timezone.utc)
     all_rows = []
+
+    def source_channel_name_for_id(source_id: str) -> str:
+        if not source_id:
+            return ""
+        sid = source_id.strip().upper()
+        n = (sources_lookup.get(sid) or "").strip()
+        if n:
+            return n
+        cid = (channel_id_by_tracking_id.get(sid) or "").strip()
+        if not cid:
+            return ""
+        if cid not in title_by_channel_id:
+            title_by_channel_id[cid] = resolve_channel_title(cid) or ""
+        return title_by_channel_id[cid]
 
     for ch in channels:
         handle = ch.get("handle") or ch.get("name", "")
@@ -80,7 +102,9 @@ def run():
 
         for video in videos:
             source_id = parse_source_id(video.get("description", ""))
-            source_channel_name = (sources_lookup.get(source_id, "") if source_id else "") or ""
+            source_channel_name = source_channel_name_for_id(source_id) if source_id else ""
+            if source_id and source_channel_name:
+                sources_lookup[source_id.strip().upper()] = source_channel_name
             row = build_row(
                 video,
                 main_channel_id=channel_id,
@@ -97,6 +121,12 @@ def run():
         print(f"Appended {len(all_rows)} rows to videostatsraw.")
     else:
         print("No rows to append.")
+
+    updated_sources = backfill_missing_source_channel_names(
+        sources_rows_detail, title_by_channel_id
+    )
+    if updated_sources:
+        print(f"Backfilled {updated_sources} source channel name(s) on Sources tab.")
 
     # Phase 3: channel daily stats (one row per channel)
     channel_daily_rows = []

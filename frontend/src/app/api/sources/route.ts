@@ -177,12 +177,16 @@ export async function GET(request: NextRequest) {
 
       const views = Number(viewsRaw ?? 0) || 0;
 
+      const nameFromVideoRow = String(row[10] ?? "").trim();
+      const nameFromSourcesSheet = sourcesLookup.get(sourceId) ?? "";
+      const fallbackLabel =
+        sourceId === "UNKNOWN"
+          ? "Unknown source"
+          : nameFromVideoRow || nameFromSourcesSheet || sourceId;
+
       const existing = bySource.get(sourceId) ?? {
         source_id: sourceId,
-        source_channel_name:
-          sourceId === "UNKNOWN"
-            ? "Unknown source"
-            : sourcesLookup.get(sourceId) || sourceId,
+        source_channel_name: fallbackLabel,
         videos: 0,
         total_views: 0,
         avg_views: 0,
@@ -194,6 +198,10 @@ export async function GET(request: NextRequest) {
             : (nicheTagsById.get(sourceId) ?? []),
         used_on_channels: [],
       };
+
+      if (nameFromVideoRow) {
+        existing.source_channel_name = nameFromVideoRow;
+      }
 
       existing.videos += 1;
       existing.total_views += views;

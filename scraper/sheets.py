@@ -179,10 +179,13 @@ def _get_sheets_service():
     return build("sheets", "v4", credentials=credentials)
 
 
-def get_sources_lookup(spreadsheet_id=None, tab_name=None):
+def get_sources_tracking_maps(spreadsheet_id=None, tab_name=None):
     """
-    Read Sources sheet and return a dict: source_id (e.g. SRC0001) -> source_channel_name.
-    Uses columns B (Channel name) and D (Tracking ID); header row 5, data from row 6.
+    Read Sources tab: B=Channel name, C=Channel ID (UC…), D=Tracking ID, E=Link.
+    Returns:
+      - names: tracking_id -> non-empty channel name from column B
+      - channel_ids: tracking_id -> column C (when set)
+      - rows_detail: list of (sheet_row_1based, tracking_id, name, channel_id) for backfill
     """
     config = load_config()
     spreadsheet_id = spreadsheet_id or config["spreadsheetId"]
@@ -197,14 +200,80 @@ def get_sources_lookup(spreadsheet_id=None, tab_name=None):
         .execute()
     )
     rows = result.get("values", [])
-    lookup = {}
-    for row in rows:
-        # row: [Channel, Channel ID, Tracking ID, Link] -> indices 0,1,2,3
-        if len(row) >= 3 and row[2].strip():
-            tracking_id = row[2].strip().upper()
-            channel_name = row[0].strip() if len(row) > 0 and row[0] else ""
-            lookup[tracking_id] = channel_name
-    return lookup
+    names: dict = {}
+    channel_ids: dict = {}
+    rows_detail: list = []
+    for i, row in enumerate(rows):
+        # row: [Channel, Channel ID, Tracking ID, Link]
+        if len(row) < 3 or not str(row[2]).strip():
+            continue
+        tracking_id = str(row[2]).strip().upper()
+        channel_name = str(row[0]).strip() if len(row) > 0 and row[0] else ""
+        channel_id = str(row[1]).strip() if len(row) > 1 and row[1] else ""
+        sheet_row = SOURCES_DATA_START + i
+        rows_detail.append((sheet_row, tracking_id, channel_name, channel_id))
+        if channel_name:
+            names[tracking_id] = channel_name
+        if channel_id:
+            channel_ids[tracking_id] = channel_id
+    return names, channel_ids, rows_detail
+
+
+def get_sources_lookup(spreadsheet_id=None, tab_name=None):
+    """
+    Read Sources sheet and return a dict: source_id (e.g. SRC0001) -> source_channel_name.
+    Uses columns B (Channel name) and D (Tracking ID); header row 5, data from row 6.
+    """
+    names, _, _ = get_sources_tracking_maps(spreadsheet_id, tab_name)
+    return names
+
+
+def backfill_missing_source_channel_names(
+    rows_detail: list,
+    title_by_channel_id: dict,
+    spreadsheet_id=None,
+    tab_name=None,
+) -> int:
+    """
+    Write YouTube channel titles into Sources column B where B is empty and C has a channel id.
+    title_by_channel_id is updated with any newly resolved titles.
+    """
+    from .youtube_client import resolve_channel_title
+
+    config = load_config()
+    spreadsheet_id = spreadsheet_id or config["spreadsheetId"]
+    tab_name = tab_name or config.get("sourcesTab", "sheet")
+
+    data = []
+    for sheet_row, _tid, channel_name, channel_id in rows_detail:
+        if channel_name.strip() or not channel_id.strip():
+            continue
+        cid = channel_id.strip()
+        title = title_by_channel_id.get(cid)
+        if title is None:
+            title = resolve_channel_title(cid) or ""
+            title_by_channel_id[cid] = title
+        if not title:
+            continue
+        data.append(
+            {
+                "range": f"'{tab_name}'!B{sheet_row}",
+                "values": [[title]],
+            }
+        )
+
+    if not data:
+        return 0
+
+    sheets = _get_sheets_service()
+    chunk_size = 100
+    for i in range(0, len(data), chunk_size):
+        chunk = data[i : i + chunk_size]
+        sheets.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"valueInputOption": "USER_ENTERED", "data": chunk},
+        ).execute()
+    return len(data)
 
 
 def ensure_videostats_headers(spreadsheet_id=None, tab_name=None):
