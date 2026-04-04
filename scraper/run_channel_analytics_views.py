@@ -272,8 +272,10 @@ def run(days: int = 28, tab_name: str = DEFAULT_TAB) -> None:
             print(f"Skip analytics (resolve channel id failed): {name} (@{handle})")
 
     out_rows: List[List[Any]] = []
+    channel_ids_written_this_run: set[str] = set()
 
     total_kept = 0
+    tokens_failed = 0
     for i, payload in enumerate(token_payloads):
         label = f"token#{i + 1}"
         try:
@@ -283,6 +285,7 @@ def run(days: int = 28, tab_name: str = DEFAULT_TAB) -> None:
                 analytics, start_date, end_date
             )
         except Exception as e:
+            tokens_failed += 1
             print(f"[{label}] Skip token (fetch failed): {e}")
             continue
 
@@ -294,6 +297,7 @@ def run(days: int = 28, tab_name: str = DEFAULT_TAB) -> None:
                 continue
             kept += 1
             channels_seen.add(cid)
+            channel_ids_written_this_run.add(cid)
             out_rows.append(
                 [
                     d["date"],
@@ -309,6 +313,21 @@ def run(days: int = 28, tab_name: str = DEFAULT_TAB) -> None:
         )
 
     print(f"Kept {total_kept} total rows for configured channels (all tokens)")
+
+    if allowed:
+        missing = [
+            allowed[cid]
+            for cid in sorted(allowed.keys())
+            if cid not in channel_ids_written_this_run
+        ]
+        if missing:
+            print(
+                "WARNING: No YouTube Analytics rows written this run for "
+                f"{len(missing)} configured channel(s): {', '.join(missing)}. "
+                "Each channel needs an OAuth refresh token for the Google account that owns it "
+                f"in YT_ANALYTICS_TOKENS_JSON ({tokens_failed}/{len(token_payloads)} token(s) failed). "
+                "invalid_grant means refresh the token (re-run OAuth) for that login."
+            )
 
     updated_map = dict(existing_map)
     for row in out_rows:
