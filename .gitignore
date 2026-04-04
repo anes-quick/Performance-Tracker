@@ -21,6 +21,8 @@ frontend/.env*.local
 **/client_secret*.json
 **/token*.json
 **/credentials*.json
+check tokens
+check-tokens-railway-paste.txt
 # Local GCP / service account JSON (use Railway/Vercel secrets in prod)
 neon-feat*.json
 *-service-account*.json
