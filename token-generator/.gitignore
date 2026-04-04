@@ -1,0 +1,6 @@
+analytics-token-*.json
+client_secret.json
+railway-yt-analytics-tokens.json
+railway-yt-analytics-tokens.compact.txt
+out/
+
