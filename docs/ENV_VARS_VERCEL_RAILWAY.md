@@ -37,6 +37,7 @@ Optional: `VERCEL_PRODUCTION_URL=https://your-app.vercel.app python3 scripts/pri
 
 | Variable | What to put |
 |----------|-------------|
+| **`SCRAPE_ENABLED`** | **`0`**, **`false`**, **`no`**, or **`off`** = **skip all scrapes** (`nightly-scrape.sh` exits immediately; no YouTube/Sheets writes). Cron can stay scheduled — it will no-op. Unset or **`1`** = scraping runs as usual. |
 | **`RUN_SCRAPE_ON_START`** | **`0`** = do **not** run the full scrape when the container starts (recommended: pair with **Cron** `bash scripts/nightly-scrape.sh`). **`1`** or unset = run scrape on **every** deploy/restart (heavy on APIs). |
 | **`GOOGLE_SERVICE_ACCOUNT_JSON`** | Paste the **same** full service account JSON as on Vercel (minified one line is safest). |
 | **`GOOGLE_SERVICE_ACCOUNT_JSON_BASE64`** | **If JSON var breaks on Railway:** one-line base64 of that file: `base64 -i key.json \| tr -d '\n'` (macOS). The scraper decodes this automatically. |

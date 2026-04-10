@@ -79,6 +79,8 @@ bash scripts/nightly-scrape.sh
 
 on your chosen schedule (e.g. once per day). Then **code deploys don’t** trigger a full scrape; only the cron does.
 
+**Pause all scraping (no YouTube/Sheets writes):** set **`SCRAPE_ENABLED=0`** (or `false` / `off`) in Railway. `nightly-scrape.sh` exits immediately (cron can stay; it no-ops). Set **`SCRAPE_ENABLED=1`** or remove the variable to turn scraping back on.
+
 ### GitHub Actions (alternative)
 
 Schedule `cron: '0 0 * * *'`, checkout repo, setup Python, add secrets for service account JSON and API key, run `bash scripts/nightly-scrape.sh`. You still need a strategy for **OAuth token files** (e.g. base64 secret → write to `scraper/` before running).
